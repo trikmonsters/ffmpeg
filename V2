@@ -1,0 +1,192 @@
+name: Video Editor - Natural Color Grading & Logo
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'URL video yang ingin diedit'
+        required: true
+        default: ''
+      logo_text:
+        description: 'Teks logo di atas center'
+        required: true
+        default: 'MY LOGO'
+      font_size:
+        description: 'Ukuran font teks logo (default: 60)'
+        required: false
+        default: '60'
+      font_color:
+        description: 'Warna teks logo (default: white)'
+        required: false
+        default: 'white'
+
+permissions:
+  contents: write
+
+jobs:
+  edit-video:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+
+      - name: Download Video
+        run: |
+          echo "📥 Downloading video..."
+
+          curl -L \
+            --max-time 120 \
+            --retry 3 \
+            --retry-delay 5 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            -H "Referer: https://www.tiktok.com/" \
+            -H "Accept: video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5" \
+            -H "Accept-Language: en-US,en;q=0.9" \
+            -o input_video.mp4 \
+            "${{ github.event.inputs.video_url }}"
+
+          FILE_SIZE=$(stat -c%s "input_video.mp4" 2>/dev/null || echo "0")
+          echo "📦 Downloaded size: ${FILE_SIZE} bytes"
+
+          if [ "$FILE_SIZE" -lt 10000 ]; then
+            echo "❌ ERROR: File terlalu kecil. URL mungkin sudah expired."
+            cat input_video.mp4 | head -c 500 || true
+            exit 1
+          fi
+
+          FILE_TYPE=$(file input_video.mp4)
+          echo "📄 File type: $FILE_TYPE"
+
+          if echo "$FILE_TYPE" | grep -qiE "HTML|text|JSON|XML"; then
+            echo "❌ ERROR: Yang didownload bukan video."
+            cat input_video.mp4 | head -c 500 || true
+            exit 1
+          fi
+
+          echo "✅ Download berhasil! Size: $(ls -lh input_video.mp4 | awk '{print $5}')"
+
+      - name: Get Video Info
+        run: |
+          echo "📊 Video info:"
+          ffprobe -v error \
+            -select_streams v:0 \
+            -show_entries stream=width,height,duration,codec_name,r_frame_rate \
+            -of default=noprint_wrappers=1 \
+            input_video.mp4 || echo "⚠️ Could not read stream info"
+          ffprobe -v error -show_entries format=duration \
+            -of default=noprint_wrappers=1 input_video.mp4 || true
+
+      - name: Edit Video
+        run: |
+          LOGO_TEXT="${{ github.event.inputs.logo_text }}"
+          FONT_SIZE="${{ github.event.inputs.font_size }}"
+          FONT_COLOR="${{ github.event.inputs.font_color }}"
+
+          echo "🎬 Applying natural color grading:"
+          echo "  - Contrast  : 1.45 (ditinggikan, tetap natural)"
+          echo "  - Brightness: 0.01 (+1% sangat subtle)"
+          echo "  - Saturation: 1.08 (+warna sedikit lebih vivid)"
+          echo "  - Gamma     : 0.95 (midtone sedikit lebih gelap → contrast terasa lebih dalam)"
+          echo "  - Logo Text : $LOGO_TEXT"
+          echo "  - Font Size : $FONT_SIZE"
+          echo "  - Font Color: $FONT_COLOR"
+
+          # Filter chain penjelasan:
+          # eq=contrast=1.45   → contrast lebih tinggi, batas aman sebelum clipping
+          # brightness=0.01    → +1% saja, hampir tidak terasa, hanya menjaga terang
+          # saturation=1.08    → warna sedikit lebih hidup (~+8%) tanpa oversaturate
+          # gamma=0.95         → midtone sedikit ditekan → kesan contrast lebih dalam & cinematic
+          # drawtext           → logo di atas center dengan shadow & box transparan
+
+          ffmpeg -i input_video.mp4 \
+            -vf "eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95,\
+          drawtext=\
+          text='${LOGO_TEXT}':\
+          fontsize=${FONT_SIZE}:\
+          fontcolor=${FONT_COLOR}:\
+          x=(w-text_w)/2:\
+          y=30:\
+          shadowcolor=black:\
+          shadowx=2:\
+          shadowy=2:\
+          box=1:\
+          boxcolor=black@0.35:\
+          boxborderw=10" \
+            -c:v libx264 \
+            -preset fast \
+            -crf 22 \
+            -c:a copy \
+            -movflags +faststart \
+            output_video.mp4
+
+          echo "✅ Selesai! Output size: $(ls -lh output_video.mp4 | awk '{print $5}')"
+
+      - name: Upload ke GitHub Release
+        run: |
+          TAG="video-output-${{ github.run_number }}"
+          RELEASE_NAME="🎬 Edited Video - Run #${{ github.run_number }}"
+
+          echo "📤 Membuat GitHub Release: $TAG"
+
+          # Buat release baru
+          RELEASE_RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/repos/${{ github.repository }}/releases \
+            -d "{
+              \"tag_name\": \"${TAG}\",
+              \"name\": \"${RELEASE_NAME}\",
+              \"body\": \"**Logo:** ${{ github.event.inputs.logo_text }}\n**Contrast:** 1.45\n**Brightness:** +1%\n**Saturation:** +8%\n**Gamma:** 0.95\n\nGenerated by run #${{ github.run_number }}\",
+              \"draft\": false,
+              \"prerelease\": false
+            }")
+
+          echo "$RELEASE_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print('Release ID:', d.get('id')); print('Upload URL:', d.get('upload_url','').split('{')[0])"
+
+          RELEASE_ID=$(echo "$RELEASE_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))")
+          RELEASE_URL=$(echo "$RELEASE_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('html_url',''))")
+
+          if [ -z "$RELEASE_ID" ]; then
+            echo "❌ Gagal membuat release. Response:"
+            echo "$RELEASE_RESPONSE"
+            exit 1
+          fi
+
+          echo "📎 Upload file video ke release..."
+          UPLOAD_RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: video/mp4" \
+            --data-binary @output_video.mp4 \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}/assets?name=output_video.mp4")
+
+          DOWNLOAD_URL=$(echo "$UPLOAD_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('browser_download_url',''))")
+
+          echo ""
+          echo "============================================"
+          echo "✅ VIDEO SIAP DIDOWNLOAD!"
+          echo "🔗 Release URL : $RELEASE_URL"
+          echo "⬇️  Download MP4: $DOWNLOAD_URL"
+          echo "============================================"
+
+          echo "## ✅ Video Siap!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 [Download output_video.mp4]($DOWNLOAD_URL)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Contrast | 1.45 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Brightness | +1% (0.01) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Saturation | +8% (1.08) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Gamma | 0.95 (cinematic midtone) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Logo | ${{ github.event.inputs.logo_text }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Font Size | ${{ github.event.inputs.font_size }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Font Color | ${{ github.event.inputs.font_color }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> File tersedia di tab **Releases** repo ini." >> $GITHUB_STEP_SUMMARY
