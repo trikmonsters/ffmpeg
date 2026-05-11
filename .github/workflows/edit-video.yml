@@ -1,4 +1,4 @@
-name: Video Editor - Save to Repo
+name: Video Editor + Upload to YouTube Shorts
 
 on:
   workflow_dispatch:
@@ -23,12 +23,24 @@ on:
         description: 'Warna teks logo (default: white)'
         required: false
         default: 'white'
+      youtube_title:
+        description: 'Judul video YouTube'
+        required: true
+        default: 'My Short Video'
+      youtube_description:
+        description: 'Deskripsi video YouTube'
+        required: false
+        default: 'Uploaded via GitHub Actions'
+      youtube_tags:
+        description: 'Tags YouTube (pisah koma, contoh: shorts,viral,fyp)'
+        required: false
+        default: 'shorts'
 
 permissions:
   contents: write
 
 jobs:
-  edit-video:
+  edit-and-upload:
     runs-on: ubuntu-latest
 
     steps:
@@ -37,10 +49,16 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install FFmpeg
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
         run: |
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
+          pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client requests
           ffmpeg -version | head -1
 
       - name: Download Video
@@ -78,6 +96,15 @@ jobs:
 
           echo "✅ Download berhasil! Size: $(ls -lh input_video.mp4 | awk '{print $5}')"
 
+      - name: Prepare media folder
+        run: |
+          if [ -e media ] && [ ! -d media ]; then
+            echo "⚠️ 'media' exists as a file, removing..."
+            rm -f media
+          fi
+          mkdir -p media
+          echo "✅ media/ folder ready"
+
       - name: Get Video Info
         run: |
           echo "📊 Video info:"
@@ -94,14 +121,7 @@ jobs:
           FONT_COLOR="${{ github.event.inputs.font_color }}"
           OUTPUT_FILE="media/${{ github.event.inputs.output_filename }}.mp4"
 
-          mkdir -p media
-
-          echo "🎬 Applying natural color grading:"
-          echo "  - Contrast  : 1.45"
-          echo "  - Brightness: 0.01 (+1%)"
-          echo "  - Saturation: 1.08 (+8%)"
-          echo "  - Gamma     : 0.95"
-          echo "  - Output    : $OUTPUT_FILE"
+          echo "🎬 Applying natural color grading..."
 
           ffmpeg -i input_video.mp4 \
             -vf "eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95,\
@@ -124,23 +144,35 @@ jobs:
             -movflags +faststart \
             "$OUTPUT_FILE"
 
-          echo "✅ Selesai! Output: $(ls -lh $OUTPUT_FILE | awk '{print $5}')"
+          echo "✅ Edit selesai! Size: $(ls -lh $OUTPUT_FILE | awk '{print $5}')"
 
-      - name: Commit & Push ke Repo
+      - name: Upload to YouTube Shorts
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: |
+          python3 scripts/upload_youtube.py \
+            --file "media/${{ github.event.inputs.output_filename }}.mp4" \
+            --title "${{ github.event.inputs.youtube_title }}" \
+            --description "${{ github.event.inputs.youtube_description }}" \
+            --tags "${{ github.event.inputs.youtube_tags }}"
+
+      - name: Commit & Push video ke Repo
         run: |
           OUTPUT_FILE="media/${{ github.event.inputs.output_filename }}.mp4"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          git pull --rebase origin ${{ github.ref_name }} || true
           git add "$OUTPUT_FILE"
 
-          # Cek apakah ada perubahan
           if git diff --cached --quiet; then
             echo "⚠️ Tidak ada perubahan untuk di-commit."
           else
             git commit -m "🎬 Add edited video: ${{ github.event.inputs.output_filename }}.mp4 [run #${{ github.run_number }}]"
-            git push
+            git push origin ${{ github.ref_name }}
             echo "✅ Video berhasil di-push ke repo!"
           fi
 
@@ -148,36 +180,25 @@ jobs:
         if: always()
         run: |
           REPO="${{ github.repository }}"
-          BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+          BRANCH="${{ github.ref_name }}"
           OUTPUT_FILE="media/${{ github.event.inputs.output_filename }}.mp4"
           RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${OUTPUT_FILE}"
 
-          echo "## 🎬 Video Editing Result" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎬 Video Editing + YouTube Upload" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ -f "$OUTPUT_FILE" ]; then
-            echo "### ✅ Berhasil disimpan ke repo!" >> $GITHUB_STEP_SUMMARY
+            echo "### ✅ Berhasil!" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Path di repo:** \`${OUTPUT_FILE}\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Raw URL (untuk \`<video src>\`):**" >> $GITHUB_STEP_SUMMARY
+            echo "**Raw URL untuk \`<video src>\`:**" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
             echo "${RAW_URL}" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Contoh pemakaian di HTML:**" >> $GITHUB_STEP_SUMMARY
+            echo "**Contoh HTML:**" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`html" >> $GITHUB_STEP_SUMMARY
             echo "<video src=\"${RAW_URL}\" controls autoplay muted playsinline></video>" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
-            echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| Contrast | 1.45 |" >> $GITHUB_STEP_SUMMARY
-            echo "| Brightness | 0.01 (+1%) |" >> $GITHUB_STEP_SUMMARY
-            echo "| Saturation | 1.08 (+8%) |" >> $GITHUB_STEP_SUMMARY
-            echo "| Gamma | 0.95 |" >> $GITHUB_STEP_SUMMARY
-            echo "| Logo | ${{ github.event.inputs.logo_text }} |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ❌ Gagal" >> $GITHUB_STEP_SUMMARY
-            echo "Video gagal diproses. Cek log di atas." >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ Gagal diproses." >> $GITHUB_STEP_SUMMARY
           fi
