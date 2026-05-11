@@ -1,0 +1,123 @@
+name: Video Editor - Contrast, Brightness & Logo Text
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'URL video yang ingin diedit'
+        required: true
+        default: 'https://v19.tiktokcdn-us.com/5bb5d02b0de08afb1e1a2f6749cb0bdd/6a010d06/video/tos/alisg/tos-alisg-pve-0037c001/o0rQE6oIbC3yS3BFABwiKfazIPoq0ZiARQhy8A/?a=1233&bti=OUBzOTg7QGo6OjZAL3AjLTAzYCMxNDNg&&bt=847&ft=nF.Th0sq1TgvjSDXYSxR6YXYM6~OjdaRpsnzXtG&mime_type=video_mp4&rc=ZDxpNmc4OGRkZjQzNmVlZ0BpM2Q7N2w5cnNkOjMzODczNEBfYGFiLl40XzYxMTEzXzI1YSNxXmE2MmQ0L3JhLS1kMS1zcw%3D%3D&vvpl=1&l=2026051016555298C3E3975C7F15ADADE3&btag=e000b0000'
+      logo_text:
+        description: 'Teks logo yang akan ditampilkan di atas center'
+        required: true
+        default: 'MY LOGO'
+      contrast:
+        description: 'Nilai contrast (default: 1.3, range: 0.0 - 2.0)'
+        required: false
+        default: '1.3'
+      brightness:
+        description: 'Nilai brightness (default: 0.05, range: -1.0 - 1.0)'
+        required: false
+        default: '0.05'
+      font_size:
+        description: 'Ukuran font teks logo (default: 60)'
+        required: false
+        default: '60'
+      font_color:
+        description: 'Warna teks logo (default: white)'
+        required: false
+        default: 'white'
+
+jobs:
+  edit-video:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+
+      - name: Verify FFmpeg installation
+        run: ffmpeg -version
+
+      - name: Download Video
+        run: |
+          echo "📥 Downloading video from URL..."
+          curl -L \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            -o input_video.mp4 \
+            "${{ github.event.inputs.video_url }}"
+          
+          echo "✅ Download complete!"
+          ls -lh input_video.mp4
+
+      - name: Get Video Info
+        run: |
+          echo "📊 Video information:"
+          ffprobe -v quiet -print_format json -show_streams input_video.mp4
+
+      - name: Edit Video (Contrast + Brightness + Logo Text)
+        run: |
+          CONTRAST="${{ github.event.inputs.contrast }}"
+          BRIGHTNESS="${{ github.event.inputs.brightness }}"
+          LOGO_TEXT="${{ github.event.inputs.logo_text }}"
+          FONT_SIZE="${{ github.event.inputs.font_size }}"
+          FONT_COLOR="${{ github.event.inputs.font_color }}"
+
+          echo "🎬 Processing video with:"
+          echo "  - Contrast : $CONTRAST"
+          echo "  - Brightness: $BRIGHTNESS"
+          echo "  - Logo Text : $LOGO_TEXT"
+          echo "  - Font Size : $FONT_SIZE"
+          echo "  - Font Color: $FONT_COLOR"
+
+          # FFmpeg filter:
+          # eq=contrast=X:brightness=Y  → adjust contrast & brightness
+          # drawtext                    → add logo text at top center
+          ffmpeg -i input_video.mp4 \
+            -vf "eq=contrast=${CONTRAST}:brightness=${BRIGHTNESS},\
+          drawtext=\
+          text='${LOGO_TEXT}':\
+          fontsize=${FONT_SIZE}:\
+          fontcolor=${FONT_COLOR}:\
+          x=(w-text_w)/2:\
+          y=30:\
+          shadowcolor=black:\
+          shadowx=2:\
+          shadowy=2:\
+          box=1:\
+          boxcolor=black@0.4:\
+          boxborderw=10" \
+            -c:v libx264 \
+            -preset fast \
+            -crf 23 \
+            -c:a copy \
+            output_video.mp4
+
+          echo "✅ Video editing complete!"
+          ls -lh output_video.mp4
+
+      - name: Upload Edited Video as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: edited-video-${{ github.run_number }}
+          path: output_video.mp4
+          retention-days: 7
+
+      - name: Summary
+        run: |
+          echo "## ✅ Video Editing Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Contrast | ${{ github.event.inputs.contrast }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Brightness | ${{ github.event.inputs.brightness }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Logo Text | ${{ github.event.inputs.logo_text }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Font Size | ${{ github.event.inputs.font_size }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Font Color | ${{ github.event.inputs.font_color }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📦 Download hasil edit dari tab **Artifacts** di atas." >> $GITHUB_STEP_SUMMARY
