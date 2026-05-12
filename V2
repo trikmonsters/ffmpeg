@@ -1,4 +1,4 @@
-name: Video Editor - Natural Color Grading & Logo
+name: Video Editor + Upload to YouTube Shorts
 
 on:
   workflow_dispatch:
@@ -7,6 +7,10 @@ on:
         description: 'URL video yang ingin diedit'
         required: true
         default: ''
+      output_filename:
+        description: 'Nama file output (tanpa .mp4, contoh: video-001)'
+        required: true
+        default: 'video-001'
       logo_text:
         description: 'Teks logo di atas center'
         required: true
@@ -19,22 +23,42 @@ on:
         description: 'Warna teks logo (default: white)'
         required: false
         default: 'white'
+      youtube_title:
+        description: 'Judul video YouTube'
+        required: true
+        default: 'My Short Video'
+      youtube_description:
+        description: 'Deskripsi video YouTube'
+        required: false
+        default: 'Uploaded via GitHub Actions'
+      youtube_tags:
+        description: 'Tags YouTube (pisah koma, contoh: shorts,viral,fyp)'
+        required: false
+        default: 'shorts'
 
 permissions:
   contents: write
 
 jobs:
-  edit-video:
+  edit-and-upload:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install FFmpeg
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
         run: |
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
+          pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client requests
           ffmpeg -version | head -1
 
       - name: Download Video
@@ -72,6 +96,15 @@ jobs:
 
           echo "✅ Download berhasil! Size: $(ls -lh input_video.mp4 | awk '{print $5}')"
 
+      - name: Prepare media folder
+        run: |
+          if [ -e media ] && [ ! -d media ]; then
+            echo "⚠️ 'media' exists as a file, removing..."
+            rm -f media
+          fi
+          mkdir -p media
+          echo "✅ media/ folder ready"
+
       - name: Get Video Info
         run: |
           echo "📊 Video info:"
@@ -80,30 +113,15 @@ jobs:
             -show_entries stream=width,height,duration,codec_name,r_frame_rate \
             -of default=noprint_wrappers=1 \
             input_video.mp4 || echo "⚠️ Could not read stream info"
-          ffprobe -v error -show_entries format=duration \
-            -of default=noprint_wrappers=1 input_video.mp4 || true
 
       - name: Edit Video
         run: |
           LOGO_TEXT="${{ github.event.inputs.logo_text }}"
           FONT_SIZE="${{ github.event.inputs.font_size }}"
           FONT_COLOR="${{ github.event.inputs.font_color }}"
+          OUTPUT_FILE="media/${{ github.event.inputs.output_filename }}.mp4"
 
-          echo "🎬 Applying natural color grading:"
-          echo "  - Contrast  : 1.45 (ditinggikan, tetap natural)"
-          echo "  - Brightness: 0.01 (+1% sangat subtle)"
-          echo "  - Saturation: 1.08 (+warna sedikit lebih vivid)"
-          echo "  - Gamma     : 0.95 (midtone sedikit lebih gelap → contrast terasa lebih dalam)"
-          echo "  - Logo Text : $LOGO_TEXT"
-          echo "  - Font Size : $FONT_SIZE"
-          echo "  - Font Color: $FONT_COLOR"
-
-          # Filter chain penjelasan:
-          # eq=contrast=1.45   → contrast lebih tinggi, batas aman sebelum clipping
-          # brightness=0.01    → +1% saja, hampir tidak terasa, hanya menjaga terang
-          # saturation=1.08    → warna sedikit lebih hidup (~+8%) tanpa oversaturate
-          # gamma=0.95         → midtone sedikit ditekan → kesan contrast lebih dalam & cinematic
-          # drawtext           → logo di atas center dengan shadow & box transparan
+          echo "🎬 Applying natural color grading..."
 
           ffmpeg -i input_video.mp4 \
             -vf "eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95,\
@@ -124,69 +142,63 @@ jobs:
             -crf 22 \
             -c:a copy \
             -movflags +faststart \
-            output_video.mp4
+            "$OUTPUT_FILE"
 
-          echo "✅ Selesai! Output size: $(ls -lh output_video.mp4 | awk '{print $5}')"
+          echo "✅ Edit selesai! Size: $(ls -lh $OUTPUT_FILE | awk '{print $5}')"
 
-      - name: Upload ke GitHub Release
+      - name: Upload to YouTube Shorts
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
         run: |
-          TAG="video-output-${{ github.run_number }}"
-          RELEASE_NAME="🎬 Edited Video - Run #${{ github.run_number }}"
+          python3 scripts/upload_youtube.py \
+            --file "media/${{ github.event.inputs.output_filename }}.mp4" \
+            --title "${{ github.event.inputs.youtube_title }}" \
+            --description "${{ github.event.inputs.youtube_description }}" \
+            --tags "${{ github.event.inputs.youtube_tags }}"
 
-          echo "📤 Membuat GitHub Release: $TAG"
+      - name: Commit & Push video ke Repo
+        run: |
+          OUTPUT_FILE="media/${{ github.event.inputs.output_filename }}.mp4"
 
-          # Buat release baru
-          RELEASE_RESPONSE=$(curl -s -X POST \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            https://api.github.com/repos/${{ github.repository }}/releases \
-            -d "{
-              \"tag_name\": \"${TAG}\",
-              \"name\": \"${RELEASE_NAME}\",
-              \"body\": \"**Logo:** ${{ github.event.inputs.logo_text }}\n**Contrast:** 1.45\n**Brightness:** +1%\n**Saturation:** +8%\n**Gamma:** 0.95\n\nGenerated by run #${{ github.run_number }}\",
-              \"draft\": false,
-              \"prerelease\": false
-            }")
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          echo "$RELEASE_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print('Release ID:', d.get('id')); print('Upload URL:', d.get('upload_url','').split('{')[0])"
+          git pull --rebase origin ${{ github.ref_name }} || true
+          git add "$OUTPUT_FILE"
 
-          RELEASE_ID=$(echo "$RELEASE_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))")
-          RELEASE_URL=$(echo "$RELEASE_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('html_url',''))")
-
-          if [ -z "$RELEASE_ID" ]; then
-            echo "❌ Gagal membuat release. Response:"
-            echo "$RELEASE_RESPONSE"
-            exit 1
+          if git diff --cached --quiet; then
+            echo "⚠️ Tidak ada perubahan untuk di-commit."
+          else
+            git commit -m "🎬 Add edited video: ${{ github.event.inputs.output_filename }}.mp4 [run #${{ github.run_number }}]"
+            git push origin ${{ github.ref_name }}
+            echo "✅ Video berhasil di-push ke repo!"
           fi
 
-          echo "📎 Upload file video ke release..."
-          UPLOAD_RESPONSE=$(curl -s -X POST \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: video/mp4" \
-            --data-binary @output_video.mp4 \
-            "https://uploads.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}/assets?name=output_video.mp4")
+      - name: Summary
+        if: always()
+        run: |
+          REPO="${{ github.repository }}"
+          BRANCH="${{ github.ref_name }}"
+          OUTPUT_FILE="media/${{ github.event.inputs.output_filename }}.mp4"
+          RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${OUTPUT_FILE}"
 
-          DOWNLOAD_URL=$(echo "$UPLOAD_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('browser_download_url',''))")
+          echo "## 🎬 Video Editing + YouTube Upload" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-          echo ""
-          echo "============================================"
-          echo "✅ VIDEO SIAP DIDOWNLOAD!"
-          echo "🔗 Release URL : $RELEASE_URL"
-          echo "⬇️  Download MP4: $DOWNLOAD_URL"
-          echo "============================================"
-
-          echo "## ✅ Video Siap!" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔗 [Download output_video.mp4]($DOWNLOAD_URL)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Contrast | 1.45 |" >> $GITHUB_STEP_SUMMARY
-          echo "| Brightness | +1% (0.01) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Saturation | +8% (1.08) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Gamma | 0.95 (cinematic midtone) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Logo | ${{ github.event.inputs.logo_text }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Font Size | ${{ github.event.inputs.font_size }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Font Color | ${{ github.event.inputs.font_color }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> File tersedia di tab **Releases** repo ini." >> $GITHUB_STEP_SUMMARY
+          if [ -f "$OUTPUT_FILE" ]; then
+            echo "### ✅ Berhasil!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Raw URL untuk \`<video src>\`:**" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "${RAW_URL}" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Contoh HTML:**" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`html" >> $GITHUB_STEP_SUMMARY
+            echo "<video src=\"${RAW_URL}\" controls autoplay muted playsinline></video>" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Gagal diproses." >> $GITHUB_STEP_SUMMARY
+          fi
