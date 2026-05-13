@@ -203,7 +203,7 @@ jobs:
 
             ffmpeg -i input_video.mp4 -i logo_ready.png \
               -filter_complex \
-                "[0:v]scale=3840:2160:flags=lanczos,unsharp=5:5:2.0:5:5:0.7,eq=contrast=1.45:brightness=0.05:saturation=1.08:gamma=1.05[base];\
+                "[0:v]scale=2160x3840:flags=lanczos,unsharp=5:5:2.0:5:5:0.7,eq=contrast=1.45:brightness=0.05:saturation=1.08:gamma=1.05[base];\
                  [base][1:v]overlay=${OVERLAY_X}:${OVERLAY_Y}[out]" \
               -map "[out]" -map 0:a? \
               -c:v libx264 -preset veryslow -crf 17 \
