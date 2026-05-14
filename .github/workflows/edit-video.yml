@@ -3,68 +3,78 @@ name: Video Editor + Multi Platform Upload
 on:
   workflow_dispatch:
     inputs:
-      # ── Video Source ──────────────────────────────────────────
+
+      # ── Video Source ─────────────────────────────
       video_url:
         description: 'URL video sumber'
         required: true
+
       output_filename:
         description: 'Nama file output (tanpa .mp4)'
         required: true
         default: 'video-001'
 
-      # ── Logo Image ────────────────────────────────────────────
+      # ── Logo ─────────────────────────────────────
       logo_image_url:
-        description: 'URL gambar logo (PNG/JPG, disarankan PNG transparan)'
+        description: 'URL gambar logo'
         required: false
         default: ''
+
       logo_width:
-        description: 'Lebar logo dalam pixel (default: 200)'
+        description: 'Lebar logo'
         required: false
         default: '200'
+
       logo_position:
-        description: 'Posisi logo: top-left | top-center | top-right | bottom-left | bottom-center | bottom-right'
+        description: 'Posisi logo'
         required: false
         default: 'top-center'
+
       logo_opacity:
-        description: 'Opacity logo 0.0 - 1.0 (default: 0.9)'
+        description: 'Opacity logo'
         required: false
         default: '0.9'
+
       logo_margin:
-        description: 'Jarak logo dari tepi dalam pixel (default: 20)'
+        description: 'Margin logo'
         required: false
         default: '20'
 
-      # ── Post Content (shared untuk semua platform) ───────────
+      # ── Content ──────────────────────────────────
       post_title:
-        description: 'Judul / caption utama (dipakai YouTube & Facebook)'
+        description: 'Judul post'
         required: true
         default: 'My Short Video'
+
       post_description:
-        description: 'Deskripsi lengkap post'
+        description: 'Deskripsi'
         required: false
         default: 'Check this out!'
+
       post_tags:
-        description: 'Tags/hashtags pisah koma (contoh: shorts,viral,fyp)'
+        description: 'Tags'
         required: false
         default: 'shorts,viral,fyp'
 
-      # ── Platform Toggle ───────────────────────────────────────
+      # ── Upload Toggle ────────────────────────────
       upload_youtube:
-        description: 'Upload ke YouTube Shorts? (true/false)'
-        required: false
-        default: 'true'
-      upload_facebook:
-        description: 'Upload ke Facebook Reels? (true/false)'
+        description: 'Upload YouTube'
         required: false
         default: 'true'
 
-      # ── Facebook Token (dikirim dari App Script) ──────────────
+      upload_facebook:
+        description: 'Upload Facebook'
+        required: false
+        default: 'true'
+
+      # ── Facebook ─────────────────────────────────
       fb_access_token:
-        description: 'Facebook Page Access Token (dikirim dari App Script)'
+        description: 'FB Token'
         required: false
         default: ''
+
       fb_page_id:
-        description: 'Facebook Page ID'
+        description: 'FB Page ID'
         required: false
         default: ''
 
@@ -76,20 +86,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ─────────────────────────────────────────────
+      # Checkout
+      # ─────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # ─────────────────────────────────────────────
+      # Python
+      # ─────────────────────────────────────────────
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
+      # ─────────────────────────────────────────────
+      # Dependencies
+      # ─────────────────────────────────────────────
       - name: Install dependencies
         run: |
+          set -e
+
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
+
           pip install \
             google-auth \
             google-auth-oauthlib \
@@ -97,136 +120,233 @@ jobs:
             google-api-python-client \
             requests \
             Pillow
+
           ffmpeg -version | head -1
+
           echo "✅ Dependencies installed"
 
+      # ─────────────────────────────────────────────
+      # Prepare Folder
+      # ─────────────────────────────────────────────
+      - name: Prepare media folder
+        run: |
+          set -e
+
+          if [ -e media ] && [ ! -d media ]; then
+            rm -f media
+          fi
+
+          mkdir -p media
+
+          echo "✅ media folder ready"
+
+      # ─────────────────────────────────────────────
+      # Download Video
+      # ─────────────────────────────────────────────
       - name: Download Video
         run: |
+          set -e
+
           echo "📥 Downloading source video..."
-          curl -L \
+
+          curl -f -L \
             --max-time 120 \
             --retry 3 \
             --retry-delay 5 \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            -H "Referer: https://www.tiktok.com/" \
-            -H "Accept: video/webm,video/ogg,video/*;q=0.9,*/*;q=0.5" \
-            -H "Accept-Language: en-US,en;q=0.9" \
+            -H "User-Agent: Mozilla/5.0" \
             -o input_video.mp4 \
             "${{ github.event.inputs.video_url }}"
 
           FILE_SIZE=$(stat -c%s "input_video.mp4" 2>/dev/null || echo "0")
+
           echo "📦 Size: ${FILE_SIZE} bytes"
 
           if [ "$FILE_SIZE" -lt 10000 ]; then
-            echo "❌ File terlalu kecil. URL mungkin expired."
-            cat input_video.mp4 | head -c 500 || true
+            echo "❌ Download gagal / file terlalu kecil"
             exit 1
           fi
 
-          FILE_TYPE=$(file input_video.mp4)
-          if echo "$FILE_TYPE" | grep -qiE "HTML|text|JSON|XML"; then
-            echo "❌ Yang didownload bukan video."
-            cat input_video.mp4 | head -c 500 || true
+          ffprobe input_video.mp4 > /dev/null 2>&1 || {
+            echo "❌ File bukan video valid"
             exit 1
-          fi
+          }
 
-          echo "✅ Download OK — $(ls -lh input_video.mp4 | awk '{print $5}')"
+          echo "✅ Download OK"
 
+      # ─────────────────────────────────────────────
+      # Download Logo
+      # ─────────────────────────────────────────────
       - name: Download Logo Image
         if: ${{ github.event.inputs.logo_image_url != '' }}
         run: |
-          echo "🖼️ Downloading logo image..."
-          curl -L \
+          set -e
+
+          echo "🖼️ Downloading logo..."
+
+          curl -f -L \
             --max-time 30 \
             -H "User-Agent: Mozilla/5.0" \
             -o logo_original.png \
             "${{ github.event.inputs.logo_image_url }}"
 
           FILE_SIZE=$(stat -c%s "logo_original.png" 2>/dev/null || echo "0")
+
           if [ "$FILE_SIZE" -lt 100 ]; then
-            echo "❌ Logo gagal didownload."
+            echo "❌ Logo invalid"
             exit 1
           fi
 
-          echo "✅ Logo downloaded — $(ls -lh logo_original.png | awk '{print $5}')"
-          file logo_original.png
+          echo "✅ Logo downloaded"
 
-      - name: Prepare Logo (Resize + Opacity)
+      # ─────────────────────────────────────────────
+      # Prepare Logo
+      # ─────────────────────────────────────────────
+      - name: Prepare Logo
         if: ${{ github.event.inputs.logo_image_url != '' }}
         run: |
+          set -e
+
           python3 scripts/prepare_logo.py \
             --input logo_original.png \
             --output logo_ready.png \
             --width "${{ github.event.inputs.logo_width }}" \
             --opacity "${{ github.event.inputs.logo_opacity }}"
 
-      - name: Prepare media folder
-        run: |
-          if [ -e media ] && [ ! -d media ]; then
-            rm -f media
-          fi
-          mkdir -p media
-          echo "✅ media/ ready"
+          [ ! -f "logo_ready.png" ] && {
+            echo "❌ logo_ready.png missing"
+            exit 1
+          }
 
+          echo "✅ Logo ready"
+
+      # ─────────────────────────────────────────────
+      # Video Info
+      # ─────────────────────────────────────────────
       - name: Get Video Info
         run: |
+          set -e
+
           echo "📊 Video info:"
+
           ffprobe -v error \
             -select_streams v:0 \
             -show_entries stream=width,height,duration,codec_name,r_frame_rate \
             -of default=noprint_wrappers=1 \
-            input_video.mp4 || true
+            input_video.mp4
 
+      # ─────────────────────────────────────────────
+      # Edit Video
+      # ─────────────────────────────────────────────
       - name: Edit Video
         run: |
-          OUTPUT_FILE="media/${{ github.event.inputs.output_filename }}.mp4"
+          set -e
+
+          SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
+
+          OUTPUT_FILE="media/${SAFE_NAME}.mp4"
+
           POSITION="${{ github.event.inputs.logo_position }}"
           MARGIN="${{ github.event.inputs.logo_margin }}"
+
           LOGO_EXISTS=false
 
           [ -f "logo_ready.png" ] && LOGO_EXISTS=true
 
           echo "🎬 Processing video..."
-          echo "  Logo: $LOGO_EXISTS | Position: $POSITION | Margin: $MARGIN"
+          echo "Logo: $LOGO_EXISTS"
+          echo "Position: $POSITION"
+          echo "Margin: $MARGIN"
+          echo "Output: $OUTPUT_FILE"
 
-          if [ "$LOGO_EXISTS" = "true" ]; then
-            # Hitung posisi overlay berdasarkan pilihan
-            case "$POSITION" in
-              top-left)     OVERLAY_X="$MARGIN";              OVERLAY_Y="$MARGIN" ;;
-              top-center)   OVERLAY_X="(W-w)/2";              OVERLAY_Y="$MARGIN" ;;
-              top-right)    OVERLAY_X="W-w-$MARGIN";          OVERLAY_Y="$MARGIN" ;;
-              bottom-left)  OVERLAY_X="$MARGIN";              OVERLAY_Y="H-h-$MARGIN" ;;
-              bottom-center)OVERLAY_X="(W-w)/2";              OVERLAY_Y="H-h-$MARGIN" ;;
-              bottom-right) OVERLAY_X="W-w-$MARGIN";          OVERLAY_Y="H-h-$MARGIN" ;;
-              *)            OVERLAY_X="(W-w)/2";              OVERLAY_Y="$MARGIN" ;;
-            esac
-
-            ffmpeg -i input_video.mp4 -i logo_ready.png \
--filter_complex \
-"[0:v]scale=1440x2560:flags=lanczos,unsharp=5:5:2.0:5:5:0.7,eq=contrast=1.45:brightness=0.05:saturation=1.08:gamma=1.05[base];\
-[base][1:v]overlay=${OVERLAY_X}:${OVERLAY_Y}[out]" \
--map "[out]" -map 0:a? \
--c:v libx264 -preset veryslow -crf 18 \
--movflags +faststart \
--profile:v high \
--level 4.1 \
--pix_fmt yuv420p \
--maxrate 12M \
--bufsize 24M \
--c:a aac -b:a 128k \
--af "volume=1.1" \
-"$OUTPUT_FILE"
-          else
-            # Tanpa logo
-            ffmpeg -i input_video.mp4 \
-              -vf "eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95" \
-              -c:v libx264 -preset fast -crf 22 \
-              -c:a copy -movflags +faststart \
-              "$OUTPUT_FILE"
+          if [ -z "$OUTPUT_FILE" ]; then
+            echo "❌ OUTPUT_FILE kosong"
+            exit 1
           fi
 
-          echo "✅ Edit selesai — $(ls -lh $OUTPUT_FILE | awk '{print $5}')"
+          if [ "$LOGO_EXISTS" = "true" ]; then
 
+            case "$POSITION" in
+              top-left)
+                OVERLAY_X="$MARGIN"
+                OVERLAY_Y="$MARGIN"
+                ;;
+
+              top-center)
+                OVERLAY_X="(W-w)/2"
+                OVERLAY_Y="$MARGIN"
+                ;;
+
+              top-right)
+                OVERLAY_X="W-w-$MARGIN"
+                OVERLAY_Y="$MARGIN"
+                ;;
+
+              bottom-left)
+                OVERLAY_X="$MARGIN"
+                OVERLAY_Y="H-h-$MARGIN"
+                ;;
+
+              bottom-center)
+                OVERLAY_X="(W-w)/2"
+                OVERLAY_Y="H-h-$MARGIN"
+                ;;
+
+              bottom-right)
+                OVERLAY_X="W-w-$MARGIN"
+                OVERLAY_Y="H-h-$MARGIN"
+                ;;
+
+              *)
+                OVERLAY_X="(W-w)/2"
+                OVERLAY_Y="$MARGIN"
+                ;;
+            esac
+
+            timeout 20m ffmpeg -y \
+              -i input_video.mp4 \
+              -i logo_ready.png \
+              -filter_complex "[0:v]scale=1440x2560:flags=lanczos,unsharp=5:5:2.0:5:5:0.7,eq=contrast=1.45:brightness=0.05:saturation=1.08:gamma=1.05[base];[base][1:v]overlay=${OVERLAY_X}:${OVERLAY_Y}[out]" \
+              -map "[out]" \
+              -map 0:a? \
+              -c:v libx264 \
+              -preset veryslow \
+              -crf 18 \
+              -movflags +faststart \
+              -profile:v high \
+              -level 4.1 \
+              -pix_fmt yuv420p \
+              -maxrate 12M \
+              -bufsize 24M \
+              -c:a aac \
+              -b:a 128k \
+              -af "volume=1.1" \
+              "$OUTPUT_FILE"
+
+          else
+
+            timeout 20m ffmpeg -y \
+              -i input_video.mp4 \
+              -vf "eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95" \
+              -c:v libx264 \
+              -preset fast \
+              -crf 22 \
+              -c:a copy \
+              -movflags +faststart \
+              "$OUTPUT_FILE"
+
+          fi
+
+          [ ! -f "$OUTPUT_FILE" ] && {
+            echo "❌ Output video gagal dibuat"
+            exit 1
+          }
+
+          echo "✅ Edit selesai"
+          ls -lh "$OUTPUT_FILE"
+
+      # ─────────────────────────────────────────────
+      # Upload YouTube
+      # ─────────────────────────────────────────────
       - name: Upload to YouTube Shorts
         if: ${{ github.event.inputs.upload_youtube == 'true' }}
         env:
@@ -234,15 +354,22 @@ jobs:
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
         run: |
+          set -e
+
           python3 scripts/upload_youtube.py \
             --file "media/${{ github.event.inputs.output_filename }}.mp4" \
             --title "${{ github.event.inputs.post_title }}" \
             --description "${{ github.event.inputs.post_description }}" \
             --tags "${{ github.event.inputs.post_tags }}"
 
+      # ─────────────────────────────────────────────
+      # Upload Facebook
+      # ─────────────────────────────────────────────
       - name: Upload to Facebook Reels
         if: ${{ github.event.inputs.upload_facebook == 'true' }}
         run: |
+          set -e
+
           python3 scripts/upload_facebook.py \
             --file "media/${{ github.event.inputs.output_filename }}.mp4" \
             --page-id "${{ github.event.inputs.fb_page_id }}" \
@@ -251,50 +378,62 @@ jobs:
             --description "${{ github.event.inputs.post_description }}" \
             --tags "${{ github.event.inputs.post_tags }}"
 
+      # ─────────────────────────────────────────────
+      # Commit & Push
+      # ─────────────────────────────────────────────
       - name: Commit & Push video ke Repo
         run: |
-          OUTPUT_FILE="media/${{ github.event.inputs.output_filename }}.mp4"
+          set -e
+
+          SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
+
+          OUTPUT_FILE="media/${SAFE_NAME}.mp4"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin ${{ github.ref_name }} || true
+
+          git fetch origin
+
+          git pull origin ${{ github.ref_name }} --rebase || true
+
           git add "$OUTPUT_FILE"
+
           if git diff --cached --quiet; then
-            echo "⚠️ Tidak ada perubahan."
+            echo "⚠️ Tidak ada perubahan"
           else
-            git commit -m "🎬 ${{ github.event.inputs.output_filename }}.mp4 [run #${{ github.run_number }}]"
+            git commit -m "🎬 ${SAFE_NAME}.mp4 [run #${{ github.run_number }}]"
             git push origin ${{ github.ref_name }}
-            echo "✅ Pushed ke repo!"
+
+            echo "✅ Pushed ke repo"
           fi
 
+      # ─────────────────────────────────────────────
+      # Summary
+      # ─────────────────────────────────────────────
       - name: Summary
         if: always()
         run: |
+          SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
+
+          OUTPUT_FILE="media/${SAFE_NAME}.mp4"
+
           REPO="${{ github.repository }}"
           BRANCH="${{ github.ref_name }}"
-          OUTPUT_FILE="media/${{ github.event.inputs.output_filename }}.mp4"
+
           RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${OUTPUT_FILE}"
 
-          echo "## 🎬 Multi-Platform Video Upload" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎬 Video Result" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ -f "$OUTPUT_FILE" ]; then
-            echo "### ✅ Video berhasil diproses" >> $GITHUB_STEP_SUMMARY
+
+            echo "✅ Success" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Raw URL:**" >> $GITHUB_STEP_SUMMARY
+
             echo "\`${RAW_URL}\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
 
-            # Tampilkan hasil upload jika ada
-            if [ -f "upload_results.json" ]; then
-              echo "**Upload Results:**" >> $GITHUB_STEP_SUMMARY
-              cat upload_results.json >> $GITHUB_STEP_SUMMARY
-            fi
-
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**HTML embed:**" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`html" >> $GITHUB_STEP_SUMMARY
-            echo "<video src=\"${RAW_URL}\" controls autoplay muted playsinline></video>" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ❌ Video gagal diproses" >> $GITHUB_STEP_SUMMARY
+
+            echo "❌ Failed" >> $GITHUB_STEP_SUMMARY
+
           fi
