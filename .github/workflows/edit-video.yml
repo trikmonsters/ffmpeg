@@ -1,5 +1,8 @@
 name: Video Editor + Multi Platform Upload
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   workflow_dispatch:
     inputs:
@@ -319,7 +322,7 @@ jobs:
               -bufsize 24M \
               -c:a aac \
               -b:a 128k \
-              -af "volume=1.1" \
+              -af "volume=2.0" \
               "$OUTPUT_FILE"
 
           else
