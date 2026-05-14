@@ -201,14 +201,21 @@ jobs:
               *)            OVERLAY_X="(W-w)/2";              OVERLAY_Y="$MARGIN" ;;
             esac
 
-            ffmpeg -i input_video.mp4 -i logo_ready.png \
-              -filter_complex \
-                "[0:v]scale=2160x3840:flags=lanczos,unsharp=5:5:2.0:5:5:0.7,eq=contrast=1.45:brightness=0.05:saturation=1.08:gamma=1.05[base];\
-                 [base][1:v]overlay=${OVERLAY_X}:${OVERLAY_Y}[out]" \
-              -map "[out]" -map 0:a? \
-              -c:v libx264 -preset veryslow -crf 17 \
-              -c:a copy -movflags +faststart \
-              "$OUTPUT_FILE"
+            ffmpeg -i input_video.mp4 -i logo_ready.png \ 
+            -filter_complex \
+              "[0:v]scale=1440x2560:flags=lanczos,unsharp=5:5:2.0:5:5:0.7,eq=contrast=1.45:brightness=0.05:saturation=1.08:gamma=1.05[base];\ 
+              [base][1:v]overlay=${OVERLAY_X}:${OVERLAY_Y}[out]" \ 
+            -map "[out]" -map 0:a? \ 
+            -c:v libx264 -preset veryslow -crf 18 \ 
+            -movflags +faststart \ 
+            -profile:v high \
+            -level 4.1 \
+            -pix_fmt yuv420p \
+            -maxrate 12M \
+            -bufsize 24M \
+            -c:a aac -b:a 128k \
+            -af "volume=1.1" \
+            "$OUTPUT_FILE"
           else
             # Tanpa logo
             ffmpeg -i input_video.mp4 \
