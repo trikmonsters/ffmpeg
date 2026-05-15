@@ -262,11 +262,10 @@ def fill_caption(page, text):
             for word in words:
                 if word.startswith("#"):
                     # Handle hashtag
+                    page.keyboard.press("Space")
                     box.press_sequentially(word, delay=120)
                     time.sleep(2)
                     page.keyboard.press("Enter")
-                    time.sleep(1)
-                    page.keyboard.press("Space")
                     time.sleep(0.5)
                 else:
                     # Handle normal text
