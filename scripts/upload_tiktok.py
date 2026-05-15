@@ -1,9 +1,3 @@
-"""
-TikTok Uploader - Stable Version
-Upload video dari URL atau file lokal ke TikTok menggunakan Playwright
-Support cookies JSON + handle content check popup
-"""
-
 import os
 import sys
 import json
@@ -49,13 +43,6 @@ def download_video(url: str, output: Path):
 
 
 def prepare_video(source):
-    """
-    Prepare video from various sources:
-    - HTTP/HTTPS URL: download video
-    - file:// path: copy local file
-    - Regular path: copy local file
-    """
-    
     # Check if source is URL
     if source.startswith("http://") or source.startswith("https://"):
         download_video(source, VIDEO_FILE)
@@ -275,7 +262,6 @@ def fill_caption(page, text):
             for word in words:
                 if word.startswith("#"):
                     # Handle hashtag
-                    page.keyboard.press("Space")
                     box.press_sequentially(word, delay=120)
                     time.sleep(2)
                     page.keyboard.press("Enter")
