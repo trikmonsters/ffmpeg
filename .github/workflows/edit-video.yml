@@ -59,6 +59,11 @@ on:
         required: false
         default: 'shorts,viral,fyp'
 
+      tiktok_description:
+        description: 'TikTok Caption'
+        required: false
+        default: 'Video keren! #fyp #viral'
+
       # ── Upload Toggle ────────────────────────────
       upload_youtube:
         description: 'Upload YouTube'
@@ -67,6 +72,11 @@ on:
 
       upload_facebook:
         description: 'Upload Facebook'
+        required: false
+        default: 'true'
+
+      upload_tiktok:
+        description: 'Upload TikTok'
         required: false
         default: 'true'
 
@@ -81,12 +91,10 @@ on:
         required: false
         default: ''
 
-permissions:
-  contents: write
-
 jobs:
   edit-and-upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
 
     steps:
 
@@ -95,8 +103,6 @@ jobs:
       # ─────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       # ─────────────────────────────────────────────
       # Python
@@ -122,7 +128,11 @@ jobs:
             google-auth-httplib2 \
             google-api-python-client \
             requests \
-            Pillow
+            Pillow \
+            playwright
+
+          playwright install chromium
+          playwright install-deps chromium
 
           ffmpeg -version | head -1
 
@@ -134,14 +144,7 @@ jobs:
       - name: Prepare media folder
         run: |
           set -e
-
-          if [ -e media ] && [ ! -d media ]; then
-            rm -f media
-          fi
-
           mkdir -p media
-
-          echo "✅ media folder ready"
 
       # ─────────────────────────────────────────────
       # Download Video
@@ -160,17 +163,8 @@ jobs:
             -o input_video.mp4 \
             "${{ github.event.inputs.video_url }}"
 
-          FILE_SIZE=$(stat -c%s "input_video.mp4" 2>/dev/null || echo "0")
-
-          echo "📦 Size: ${FILE_SIZE} bytes"
-
-          if [ "$FILE_SIZE" -lt 10000 ]; then
-            echo "❌ Download gagal / file terlalu kecil"
-            exit 1
-          fi
-
           ffprobe input_video.mp4 > /dev/null 2>&1 || {
-            echo "❌ File bukan video valid"
+            echo "❌ Invalid video"
             exit 1
           }
 
@@ -179,25 +173,14 @@ jobs:
       # ─────────────────────────────────────────────
       # Download Logo
       # ─────────────────────────────────────────────
-      - name: Download Logo Image
+      - name: Download Logo
         if: ${{ github.event.inputs.logo_image_url != '' }}
         run: |
           set -e
 
-          echo "🖼️ Downloading logo..."
-
           curl -f -L \
-            --max-time 30 \
-            -H "User-Agent: Mozilla/5.0" \
             -o logo_original.png \
             "${{ github.event.inputs.logo_image_url }}"
-
-          FILE_SIZE=$(stat -c%s "logo_original.png" 2>/dev/null || echo "0")
-
-          if [ "$FILE_SIZE" -lt 100 ]; then
-            echo "❌ Logo invalid"
-            exit 1
-          fi
 
           echo "✅ Logo downloaded"
 
@@ -214,28 +197,6 @@ jobs:
             --output logo_ready.png \
             --width "${{ github.event.inputs.logo_width }}" \
             --opacity "${{ github.event.inputs.logo_opacity }}"
-
-          [ ! -f "logo_ready.png" ] && {
-            echo "❌ logo_ready.png missing"
-            exit 1
-          }
-
-          echo "✅ Logo ready"
-
-      # ─────────────────────────────────────────────
-      # Video Info
-      # ─────────────────────────────────────────────
-      - name: Get Video Info
-        run: |
-          set -e
-
-          echo "📊 Video info:"
-
-          ffprobe -v error \
-            -select_streams v:0 \
-            -show_entries stream=width,height,duration,codec_name,r_frame_rate \
-            -of default=noprint_wrappers=1 \
-            input_video.mp4
 
       # ─────────────────────────────────────────────
       # Edit Video
@@ -256,15 +217,6 @@ jobs:
           [ -f "logo_ready.png" ] && LOGO_EXISTS=true
 
           echo "🎬 Processing video..."
-          echo "Logo: $LOGO_EXISTS"
-          echo "Position: $POSITION"
-          echo "Margin: $MARGIN"
-          echo "Output: $OUTPUT_FILE"
-
-          if [ -z "$OUTPUT_FILE" ]; then
-            echo "❌ OUTPUT_FILE kosong"
-            exit 1
-          fi
 
           if [ "$LOGO_EXISTS" = "true" ]; then
 
@@ -273,84 +225,65 @@ jobs:
                 OVERLAY_X="$MARGIN"
                 OVERLAY_Y="$MARGIN"
                 ;;
-
               top-center)
                 OVERLAY_X="(W-w)/2"
                 OVERLAY_Y="$MARGIN"
                 ;;
-
               top-right)
                 OVERLAY_X="W-w-$MARGIN"
                 OVERLAY_Y="$MARGIN"
                 ;;
-
               bottom-left)
                 OVERLAY_X="$MARGIN"
                 OVERLAY_Y="H-h-$MARGIN"
                 ;;
-
               bottom-center)
                 OVERLAY_X="(W-w)/2"
                 OVERLAY_Y="H-h-$MARGIN"
                 ;;
-
               bottom-right)
                 OVERLAY_X="W-w-$MARGIN"
                 OVERLAY_Y="H-h-$MARGIN"
                 ;;
-
               *)
                 OVERLAY_X="(W-w)/2"
                 OVERLAY_Y="$MARGIN"
                 ;;
             esac
 
-            timeout 20m ffmpeg -y \
+            ffmpeg -y \
               -i input_video.mp4 \
               -i logo_ready.png \
               -filter_complex "[0:v]scale=1440x2560:flags=lanczos,unsharp=5:5:2.0:5:5:0.7,eq=contrast=1.45:brightness=0.05:saturation=1.08:gamma=1.05[base];[base][1:v]overlay=${OVERLAY_X}:${OVERLAY_Y}[out]" \
               -map "[out]" \
               -map 0:a? \
               -c:v libx264 \
-              -preset veryslow \
-              -crf 18 \
-              -movflags +faststart \
-              -profile:v high \
-              -level 4.1 \
+              -preset fast \
+              -crf 20 \
               -pix_fmt yuv420p \
-              -maxrate 12M \
-              -bufsize 24M \
               -c:a aac \
               -b:a 128k \
-              -af "volume=2.0" \
               "$OUTPUT_FILE"
 
           else
 
-            timeout 20m ffmpeg -y \
+            ffmpeg -y \
               -i input_video.mp4 \
               -vf "eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95" \
               -c:v libx264 \
               -preset fast \
               -crf 22 \
               -c:a copy \
-              -movflags +faststart \
               "$OUTPUT_FILE"
 
           fi
 
-          [ ! -f "$OUTPUT_FILE" ] && {
-            echo "❌ Output video gagal dibuat"
-            exit 1
-          }
-
-          echo "✅ Edit selesai"
-          ls -lh "$OUTPUT_FILE"
+          echo "✅ Video edited"
 
       # ─────────────────────────────────────────────
       # Upload YouTube
       # ─────────────────────────────────────────────
-      - name: Upload to YouTube Shorts
+      - name: Upload YouTube
         if: ${{ github.event.inputs.upload_youtube == 'true' }}
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
@@ -368,7 +301,7 @@ jobs:
       # ─────────────────────────────────────────────
       # Upload Facebook
       # ─────────────────────────────────────────────
-      - name: Upload to Facebook Reels
+      - name: Upload Facebook Reels
         if: ${{ github.event.inputs.upload_facebook == 'true' }}
         run: |
           set -e
@@ -382,61 +315,24 @@ jobs:
             --tags "${{ github.event.inputs.post_tags }}"
 
       # ─────────────────────────────────────────────
-      # Commit & Push
+      # Upload TikTok
       # ─────────────────────────────────────────────
-      - name: Commit & Push video ke Repo
+      - name: Upload TikTok
+        if: ${{ github.event.inputs.upload_tiktok == 'true' }}
         run: |
           set -e
 
-          SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
+          echo '${{ secrets.TIKTOK_COOKIES_JSON }}' > cookies.json
 
-          OUTPUT_FILE="media/${SAFE_NAME}.mp4"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git fetch origin
-
-          git pull origin ${{ github.ref_name }} --rebase || true
-
-          git add "$OUTPUT_FILE"
-
-          if git diff --cached --quiet; then
-            echo "⚠️ Tidak ada perubahan"
-          else
-            git commit -m "🎬 ${SAFE_NAME}.mp4 [run #${{ github.run_number }}]"
-            git push origin ${{ github.ref_name }}
-
-            echo "✅ Pushed ke repo"
-          fi
+          python3 scripts/uploader.py \
+            --url "file://$(pwd)/media/${{ github.event.inputs.output_filename }}.mp4" \
+            --description "${{ github.event.inputs.tiktok_description }}" \
+            --cookies cookies.json \
+            --headless
 
       # ─────────────────────────────────────────────
-      # Summary
+      # Done
       # ─────────────────────────────────────────────
-      - name: Summary
-        if: always()
+      - name: Finished
         run: |
-          SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
-
-          OUTPUT_FILE="media/${SAFE_NAME}.mp4"
-
-          REPO="${{ github.repository }}"
-          BRANCH="${{ github.ref_name }}"
-
-          RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${OUTPUT_FILE}"
-
-          echo "## 🎬 Video Result" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ -f "$OUTPUT_FILE" ]; then
-
-            echo "✅ Success" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-
-            echo "\`${RAW_URL}\`" >> $GITHUB_STEP_SUMMARY
-
-          else
-
-            echo "❌ Failed" >> $GITHUB_STEP_SUMMARY
-
-          fi
+          echo "🎉 All tasks completed"
