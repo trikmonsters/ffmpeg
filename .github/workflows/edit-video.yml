@@ -258,7 +258,7 @@ jobs:
           [0:v]scale=1728x3072:flags=lanczos,\
           unsharp=5:5:2.0:5:5:0.7,\
           eq=contrast=1.50:brightness=0.05:saturation=1.10:gamma=1.05,\
-          format=yuv444p[base];\
+          format=yuv420p[base];\
           [base][1:v]overlay=${OVERLAY_X}:${OVERLAY_Y}[vout];\
           [0:a]loudnorm=I=-14:LRA=11:TP=-1.5[aout]" \
             -map "[vout]" \
@@ -268,7 +268,7 @@ jobs:
             -crf 18 \
             -profile:v high \
             -level 5.1 \
-            -pix_fmt yuv444p \
+            -pix_fmt yuv420p \
             -movflags +faststart \
             -c:a aac \
             -b:a 192k \
