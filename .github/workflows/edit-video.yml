@@ -324,7 +324,7 @@ jobs:
 
           echo '${{ secrets.TIKTOK_COOKIES_JSON }}' > cookies.json
 
-          python3 scripts/uploader.py \
+          python3 scripts/upload_tiktok.py \
             --url "file://$(pwd)/media/${{ github.event.inputs.output_filename }}.mp4" \
             --description "${{ github.event.inputs.tiktok_description }}" \
             --cookies cookies.json \
