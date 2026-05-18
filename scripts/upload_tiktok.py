@@ -285,14 +285,13 @@ def fill_caption(page, text):
     return False
 
 
-def click_post_button(page):
-    log("📮 Mencari tombol Post...")
+def click_draft_button(page):
+    log("📂 Mencari tombol Draft...")
 
     selectors = [
-        "[data-e2e='post_video_button']",
-        "button[data-e2e='submit-button']",
-        "button:has-text('Post')",
-        "button:has-text('Posting')",
+        "[data-e2e='save-draft-button']",
+        "button:has-text('Draft')",
+        "button:has-text('Save draft')",
     ]
 
     for sel in selectors:
@@ -303,11 +302,13 @@ def click_post_button(page):
                 continue
 
             disabled = btn.get_attribute("disabled")
+
             if disabled is not None:
-                log("⏳ Tombol Post masih disabled")
+                log("⏳ Tombol Draft masih disabled")
                 continue
 
             btn.scroll_into_view_if_needed()
+
             time.sleep(1)
 
             try:
@@ -315,7 +316,8 @@ def click_post_button(page):
             except:
                 btn.click(force=True)
 
-            log(f"✅ Tombol Post diklik via: {sel}")
+            log(f"✅ Tombol Draft diklik via: {sel}")
+
             return True
 
         except Exception:
@@ -383,14 +385,16 @@ def upload_to_tiktok(video_path, cookies_path, description="", headless=True):
 
         # Post
         time.sleep(3)
-        posted = click_post_button(page)
+        drafted = click_draft_button(page)
 
-        if posted:
-            log("⏳ Menunggu redirect setelah post...")
-            time.sleep(15)
-            log("🎉 UPLOAD SUCCESS")
+        if drafted:
+            log("⏳ Menunggu save draft...")
+            time.sleep(10)
+
+            log("✅ VIDEO BERHASIL DISIMPAN KE DRAFT")
+
         else:
-            log("❌ Tombol Post gagal ditemukan")
+            log("❌ Tombol Draft gagal ditemukan")
 
         browser.close()
 
