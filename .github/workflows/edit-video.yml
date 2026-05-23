@@ -272,7 +272,7 @@ jobs:
             -bufsize 60M \
             -preset veryslow \
             -crf 17 \
-            -profile:v high \
+            -profile:v main10 \
             -level 5.1 \
             -pix_fmt yuv420p \
             -movflags +faststart \
