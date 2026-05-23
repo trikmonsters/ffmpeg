@@ -268,10 +268,8 @@ jobs:
             -r 30 \
             -g 60 \
             -b:v 20M \
-            -maxrate 30M \
-            -bufsize 60M \
-            -preset veryslow \
-            -crf 17 \
+            -preset slower \
+            -crf 18 \
             -profile:v main10 \
             -level 5.1 \
             -pix_fmt yuv420p \
