@@ -257,15 +257,21 @@ jobs:
             -filter_complex "\
           [0:v]scale=1728x3072:flags=lanczos,\
           unsharp=5:5:2.0:5:5:0.7,\
-          eq=contrast=1.50:brightness=0.05:saturation=1.10:gamma=1.05,\
+          eq=contrast=1.40:brightness=0.05:saturation=1.10:gamma=1.05,\
           format=yuv420p[base];\
           [base][1:v]overlay=${OVERLAY_X}:${OVERLAY_Y}[vout];\
           [0:a]loudnorm=I=-14:LRA=11:TP=-1.5[aout]" \
             -map "[vout]" \
             -map "[aout]" \
-            -c:v libx264 \
+            -c:v libx265 \
+            -tag:v hvc1 \
+            -r 30 \
+            -g 60 \
+            -b:v 20M \
+            -maxrate 30M \
+            -bufsize 60M \
             -preset veryslow \
-            -crf 18 \
+            -crf 17 \
             -profile:v high \
             -level 5.1 \
             -pix_fmt yuv420p \
