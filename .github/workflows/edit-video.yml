@@ -269,8 +269,8 @@ jobs:
             -g 60 \
             -b:v 20M \
             -preset slower \
-            -crf 18 \
-            -profile:v main10 \
+            -crf 19 \
+            -profile:v main \
             -level 5.1 \
             -pix_fmt yuv420p \
             -movflags +faststart \
