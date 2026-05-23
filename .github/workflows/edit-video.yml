@@ -255,7 +255,7 @@ jobs:
             -i input_video.mp4 \
             -i logo_ready.png \
             -filter_complex "\
-          [0:v]scale=1728x3072:flags=lanczos,\
+          [0:v]scale=1440 x 2560:flags=lanczos,\
           unsharp=5:5:2.0:5:5:0.7,\
           eq=contrast=1.40:brightness=0.05:saturation=1.10:gamma=1.05,\
           format=yuv420p[base];\
