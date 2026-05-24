@@ -266,15 +266,14 @@ jobs:
             -c:v libx265 \
             -tag:v hvc1 \
             -r 30 \
-            -g 60 \
-            -b:v 20M \
-            -preset slower \
+            -preset medium \
             -crf 19 \
             -profile:v main \
             -level 5.1 \
             -pix_fmt yuv420p \
             -movflags +faststart \
             -c:a aac \
+            -threads auto \
             -b:a 192k \
             -ar 48000 \
             "$OUTPUT_FILE"
