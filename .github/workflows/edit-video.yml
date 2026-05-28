@@ -265,7 +265,7 @@ jobs:
             -map "[aout]" \
             -c:v libx265 \
             -tag:v hvc1 \
-            -r 30 \
+            -r 60 \
             -preset medium \
             -crf 19 \
             -profile:v main \
