@@ -254,6 +254,8 @@ jobs:
             -i logo_ready.png \
             -filter_complex "\
           [0:v]scale=1440x2560:flags=lanczos,\
+          crop=iw*0.98:ih*0.98:(iw-iw*0.98)/2:(ih-ih*0.98)/2,\
+          scale=1440:2560:flags=lanczos,\
           unsharp=5:5:2.0:5:5:0.7,\
           eq=contrast=1.40:brightness=0.05:saturation=1.10:gamma=1.05,\
           format=yuv420p[base];\
