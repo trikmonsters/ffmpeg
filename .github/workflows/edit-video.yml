@@ -95,6 +95,8 @@ jobs:
   edit-and-upload:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: write  # diperlukan untuk buat & hapus GitHub Release
 
     steps:
 
@@ -102,13 +104,13 @@ jobs:
       # Checkout
       # ─────────────────────────────────────────────
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       # ─────────────────────────────────────────────
       # Python
       # ─────────────────────────────────────────────
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -128,11 +130,7 @@ jobs:
             google-auth-httplib2 \
             google-api-python-client \
             requests \
-            Pillow \
-            playwright
-
-          playwright install chromium
-          playwright install-deps chromium
+            Pillow
 
           ffmpeg -version | head -1
 
@@ -328,20 +326,107 @@ jobs:
             --tags "${{ github.event.inputs.post_tags }}"
 
       # ─────────────────────────────────────────────
-      # Upload TikTok
+      # TikTok: Hapus release lama (bersihkan storage)
       # ─────────────────────────────────────────────
-      - name: Upload TikTok
+      - name: Hapus release lama
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
 
-          echo '${{ secrets.TIKTOK_COOKIES_JSON }}' > cookies.json
+          echo "🗑️ Mengecek release lama..."
 
-          python3 scripts/upload_tiktok.py \
-            --url "file://$(pwd)/media/${{ github.event.inputs.output_filename }}.mp4" \
-            --description "${{ github.event.inputs.tiktok_description }}" \
-            --cookies cookies.json \
-            --headless
+          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases \
+            --jq '.[] | select(.tag_name == "tiktok-video") | .id' 2>/dev/null || echo "")
+
+          if [ -n "$RELEASE_ID" ]; then
+            echo "Menghapus release lama ID: $RELEASE_ID"
+            gh api -X DELETE repos/${{ github.repository }}/releases/$RELEASE_ID
+            sleep 2
+            gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/tiktok-video || true
+            sleep 2
+            echo "✅ Release lama dihapus"
+          else
+            echo "ℹ️ Tidak ada release lama, lanjut..."
+          fi
+
+      # ─────────────────────────────────────────────
+      # TikTok: Upload video ke GitHub Release (hosting sementara)
+      # ─────────────────────────────────────────────
+      - name: Upload video ke GitHub Release
+        if: ${{ github.event.inputs.upload_tiktok == 'true' }}
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: tiktok-video
+          name: TikTok Video (hosting sementara)
+          body: "File hosting sementara untuk Buffer API. Akan diganti di run berikutnya."
+          files: media/${{ github.event.inputs.output_filename }}.mp4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ─────────────────────────────────────────────
+      # TikTok: Ambil URL video dari release
+      # ─────────────────────────────────────────────
+      - name: Ambil URL video
+        if: ${{ github.event.inputs.upload_tiktok == 'true' }}
+        id: get_url
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          sleep 3
+
+          VIDEO_URL=$(gh api repos/${{ github.repository }}/releases/tags/tiktok-video \
+            --jq '.assets[0].browser_download_url')
+
+          if [ -z "$VIDEO_URL" ]; then
+            echo "❌ Gagal mendapatkan URL video dari release"
+            exit 1
+          fi
+
+          echo "VIDEO_URL=$VIDEO_URL" >> $GITHUB_ENV
+          echo "✅ URL video: $VIDEO_URL"
+
+      # ─────────────────────────────────────────────
+      # TikTok: Post via Buffer API (auto tayang 2 menit)
+      # ─────────────────────────────────────────────
+      - name: Upload TikTok via Buffer API
+        if: ${{ github.event.inputs.upload_tiktok == 'true' }}
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_CHANNEL_ID: "6a2032d8c687a22dd457622f"
+        run: |
+          set -e
+
+          CAPTION="${{ github.event.inputs.tiktok_description }}"
+          DUE_AT=$(date -u -d '+2 minutes' '+%Y-%m-%dT%H:%M:%S.000Z')
+
+          echo "📤 Mengirim ke Buffer API..."
+          echo "📅 Jadwal tayang: $DUE_AT"
+          echo "🎬 Video URL: $VIDEO_URL"
+
+          RESPONSE=$(curl -s -X POST https://api.buffer.com \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${BUFFER_API_KEY}" \
+            -d "{
+              \"query\": \"mutation { createPost(input: { text: \\\"${CAPTION}\\\", channelId: \\\"${BUFFER_CHANNEL_ID}\\\", schedulingType: automatic, mode: customScheduled, dueAt: \\\"${DUE_AT}\\\", assets: [{ video: { url: \\\"${VIDEO_URL}\\\" } }] }) { ... on PostActionSuccess { post { id dueAt } } ... on MutationError { message } } }\"
+            }")
+
+          echo "Response Buffer: $RESPONSE"
+
+          if echo "$RESPONSE" | grep -q '"id"'; then
+            POST_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['createPost']['post']['id'])")
+            POST_DUE=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['createPost']['post']['dueAt'])")
+            echo "✅ BERHASIL! Post ID: $POST_ID"
+            echo "✅ Tayang otomatis: $POST_DUE"
+          else
+            echo "❌ GAGAL posting ke TikTok via Buffer"
+            echo "Response: $RESPONSE"
+            exit 1
+          fi
 
       # ─────────────────────────────────────────────
       # Done
