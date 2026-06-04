@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
     inputs:
 
-      # ── Video Source ─────────────────────────────
       video_url:
         description: 'URL video sumber'
         required: true
@@ -17,7 +16,6 @@ on:
         required: true
         default: 'video-001'
 
-      # ── Logo ─────────────────────────────────────
       logo_image_url:
         description: 'URL gambar logo'
         required: false
@@ -43,7 +41,6 @@ on:
         required: false
         default: '20'
 
-      # ── Content ──────────────────────────────────
       post_title:
         description: 'Judul post'
         required: true
@@ -64,7 +61,6 @@ on:
         required: false
         default: 'Video keren! #fyp #viral'
 
-      # ── Upload Toggle ────────────────────────────
       upload_youtube:
         description: 'Upload YouTube'
         required: false
@@ -80,7 +76,6 @@ on:
         required: false
         default: 'true'
 
-      # ── Facebook ─────────────────────────────────
       fb_access_token:
         description: 'FB Token'
         required: false
@@ -96,34 +91,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
-      contents: write  # diperlukan untuk buat & hapus GitHub Release
+      contents: write
 
     steps:
 
-      # ─────────────────────────────────────────────
-      # Checkout
-      # ─────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ─────────────────────────────────────────────
-      # Python
-      # ─────────────────────────────────────────────
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # ─────────────────────────────────────────────
-      # Dependencies
-      # ─────────────────────────────────────────────
       - name: Install dependencies
         run: |
           set -e
-
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
-
           pip install \
             google-auth \
             google-auth-oauthlib \
@@ -131,28 +115,22 @@ jobs:
             google-api-python-client \
             requests \
             Pillow
-
           ffmpeg -version | head -1
-
           echo "✅ Dependencies installed"
 
-      # ─────────────────────────────────────────────
-      # Prepare Folder
-      # ─────────────────────────────────────────────
-      - name: Prepare media folder
+      - name: Prepare workspace
         run: |
           set -e
           mkdir -p media
+          SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
+          echo "SAFE_NAME=${SAFE_NAME}" >> $GITHUB_ENV
+          echo "OUTPUT_FILE=media/${SAFE_NAME}.mp4" >> $GITHUB_ENV
+          echo "✅ SAFE_NAME: ${SAFE_NAME}"
 
-      # ─────────────────────────────────────────────
-      # Download Video
-      # ─────────────────────────────────────────────
       - name: Download Video
         run: |
           set -e
-
           echo "📥 Downloading source video..."
-
           curl -f -L \
             --max-time 120 \
             --retry 3 \
@@ -160,99 +138,53 @@ jobs:
             -H "User-Agent: Mozilla/5.0" \
             -o input_video.mp4 \
             "${{ github.event.inputs.video_url }}"
-
           ffprobe input_video.mp4 > /dev/null 2>&1 || {
-            echo "❌ Invalid video"
+            echo "❌ Invalid video file"
             exit 1
           }
-
           echo "✅ Download OK"
 
-      # ─────────────────────────────────────────────
-      # Download Logo
-      # ─────────────────────────────────────────────
       - name: Download Logo
         if: ${{ github.event.inputs.logo_image_url != '' }}
         run: |
           set -e
-
-          curl -f -L \
-            -o logo_original.png \
-            "${{ github.event.inputs.logo_image_url }}"
-
+          curl -f -L -o logo_original.png "${{ github.event.inputs.logo_image_url }}"
           echo "✅ Logo downloaded"
 
-      # ─────────────────────────────────────────────
-      # Prepare Logo
-      # ─────────────────────────────────────────────
       - name: Prepare Logo
         if: ${{ github.event.inputs.logo_image_url != '' }}
         run: |
           set -e
-
           python3 scripts/prepare_logo.py \
             --input logo_original.png \
             --output logo_ready.png \
             --width "${{ github.event.inputs.logo_width }}" \
             --opacity "${{ github.event.inputs.logo_opacity }}"
 
-      # ─────────────────────────────────────────────
-      # Edit Video
-      # ─────────────────────────────────────────────
       - name: Edit Video
         run: |
           set -e
-
-          SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
-
-          OUTPUT_FILE="media/${SAFE_NAME}.mp4"
-
           POSITION="${{ github.event.inputs.logo_position }}"
           MARGIN="${{ github.event.inputs.logo_margin }}"
-
           LOGO_EXISTS=false
-
           [ -f "logo_ready.png" ] && LOGO_EXISTS=true
-
           echo "🎬 Processing video..."
 
           if [ "$LOGO_EXISTS" = "true" ]; then
-
             case "$POSITION" in
-              top-left)
-                OVERLAY_X="$MARGIN"
-                OVERLAY_Y="$MARGIN"
-                ;;
-              top-center)
-                OVERLAY_X="(W-w)/2"
-                OVERLAY_Y="$MARGIN"
-                ;;
-              top-right)
-                OVERLAY_X="W-w-$MARGIN"
-                OVERLAY_Y="$MARGIN"
-                ;;
-              bottom-left)
-                OVERLAY_X="$MARGIN"
-                OVERLAY_Y="H-h-$MARGIN"
-                ;;
-              bottom-center)
-                OVERLAY_X="(W-w)/2"
-                OVERLAY_Y="H-h-$MARGIN"
-                ;;
-              bottom-right)
-                OVERLAY_X="W-w-$MARGIN"
-                OVERLAY_Y="H-h-$MARGIN"
-                ;;
-              *)
-                OVERLAY_X="(W-w)/2"
-                OVERLAY_Y="$MARGIN"
-                ;;
+              top-left)      OVERLAY_X="$MARGIN";      OVERLAY_Y="$MARGIN" ;;
+              top-center)    OVERLAY_X="(W-w)/2";      OVERLAY_Y="$MARGIN" ;;
+              top-right)     OVERLAY_X="W-w-$MARGIN";  OVERLAY_Y="$MARGIN" ;;
+              bottom-left)   OVERLAY_X="$MARGIN";      OVERLAY_Y="H-h-$MARGIN" ;;
+              bottom-center) OVERLAY_X="(W-w)/2";      OVERLAY_Y="H-h-$MARGIN" ;;
+              bottom-right)  OVERLAY_X="W-w-$MARGIN";  OVERLAY_Y="H-h-$MARGIN" ;;
+              *)             OVERLAY_X="(W-w)/2";      OVERLAY_Y="$MARGIN" ;;
             esac
 
             ffmpeg -y \
-            -i input_video.mp4 \
-            -i logo_ready.png \
-            -filter_complex "\
+              -i input_video.mp4 \
+              -i logo_ready.png \
+              -filter_complex "\
           [0:v]scale=1440x2560:flags=lanczos,\
           crop=iw*0.98:ih*0.98:(iw-iw*0.98)/2:(ih-ih*0.98)/2,\
           scale=1440:2560:flags=lanczos,\
@@ -261,41 +193,31 @@ jobs:
           format=yuv420p[base];\
           [base][1:v]overlay=${OVERLAY_X}:${OVERLAY_Y}[vout];\
           [0:a]loudnorm=I=-14:LRA=11:TP=-1.5[aout]" \
-            -map "[vout]" \
-            -map "[aout]" \
-            -c:v libx265 \
-            -tag:v hvc1 \
-            -r 120 \
-            -preset medium \
-            -crf 19 \
-            -profile:v main \
-            -level 5.1 \
-            -pix_fmt yuv420p \
-            -movflags +faststart \
-            -c:a aac \
-            -threads auto \
-            -b:a 192k \
-            -ar 48000 \
-            "$OUTPUT_FILE"
+              -map "[vout]" -map "[aout]" \
+              -c:v libx265 -tag:v hvc1 \
+              -r 120 -preset medium -crf 19 \
+              -profile:v main -level 5.1 \
+              -pix_fmt yuv420p -movflags +faststart \
+              -c:a aac -threads auto -b:a 192k -ar 48000 \
+              "${{ env.OUTPUT_FILE }}"
 
           else
-
             ffmpeg -y \
               -i input_video.mp4 \
-              -vf "eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95" \
-              -c:v libx264 \
-              -preset fast \
-              -crf 22 \
-              -c:a copy \
-              "$OUTPUT_FILE"
-
+              -filter_complex "\
+          [0:v]scale=1440x2560:flags=lanczos,\
+          eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95,\
+          format=yuv420p[vout];\
+          [0:a]loudnorm=I=-14:LRA=11:TP=-1.5[aout]" \
+              -map "[vout]" -map "[aout]" \
+              -c:v libx264 -preset fast -crf 22 \
+              -pix_fmt yuv420p -movflags +faststart \
+              -c:a aac -b:a 192k -ar 48000 \
+              "${{ env.OUTPUT_FILE }}"
           fi
 
-          echo "✅ Video edited"
+          echo "✅ Video edited: ${{ env.OUTPUT_FILE }}"
 
-      # ─────────────────────────────────────────────
-      # Upload YouTube
-      # ─────────────────────────────────────────────
       - name: Upload YouTube
         if: ${{ github.event.inputs.upload_youtube == 'true' }}
         env:
@@ -304,58 +226,44 @@ jobs:
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
         run: |
           set -e
-
           python3 scripts/upload_youtube.py \
-            --file "media/${{ github.event.inputs.output_filename }}.mp4" \
+            --file "${{ env.OUTPUT_FILE }}" \
             --title "${{ github.event.inputs.post_title }}" \
             --description "${{ github.event.inputs.post_description }}" \
             --tags "${{ github.event.inputs.post_tags }}"
 
-      # ─────────────────────────────────────────────
-      # Upload Facebook
-      # ─────────────────────────────────────────────
       - name: Upload Facebook Reels
         if: ${{ github.event.inputs.upload_facebook == 'true' }}
         run: |
           set -e
-
           python3 scripts/upload_facebook.py \
-            --file "media/${{ github.event.inputs.output_filename }}.mp4" \
+            --file "${{ env.OUTPUT_FILE }}" \
             --page-id "${{ github.event.inputs.fb_page_id }}" \
             --access-token "${{ github.event.inputs.fb_access_token }}" \
             --title "${{ github.event.inputs.post_title }}" \
             --description "${{ github.event.inputs.post_description }}" \
             --tags "${{ github.event.inputs.post_tags }}"
 
-      # ─────────────────────────────────────────────
-      # TikTok: Hapus release lama (bersihkan storage)
-      # ─────────────────────────────────────────────
       - name: Hapus release lama
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-
           echo "🗑️ Mengecek release lama..."
-
           RELEASE_ID=$(gh api repos/${{ github.repository }}/releases \
             --jq '.[] | select(.tag_name == "tiktok-video") | .id' 2>/dev/null || echo "")
-
           if [ -n "$RELEASE_ID" ]; then
-            echo "Menghapus release lama ID: $RELEASE_ID"
+            echo "Menghapus release ID: $RELEASE_ID"
             gh api -X DELETE repos/${{ github.repository }}/releases/$RELEASE_ID
             sleep 2
             gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/tiktok-video || true
             sleep 2
             echo "✅ Release lama dihapus"
           else
-            echo "ℹ️ Tidak ada release lama, lanjut..."
+            echo "ℹ️ Tidak ada release lama"
           fi
 
-      # ─────────────────────────────────────────────
-      # TikTok: Upload video ke GitHub Release (hosting sementara)
-      # ─────────────────────────────────────────────
       - name: Upload video ke GitHub Release
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
         id: release
@@ -363,76 +271,105 @@ jobs:
         with:
           tag_name: tiktok-video
           name: TikTok Video (hosting sementara)
-          body: "File hosting sementara untuk Buffer API. Akan diganti di run berikutnya."
-          files: media/${{ github.event.inputs.output_filename }}.mp4
+          body: "Hosting sementara untuk Buffer API. Otomatis diganti di run berikutnya."
+          files: ${{ env.OUTPUT_FILE }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ─────────────────────────────────────────────
-      # TikTok: Ambil URL video dari release
-      # ─────────────────────────────────────────────
-      - name: Ambil URL video
+      - name: Ambil URL video dari release
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
-        id: get_url
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-
-          sleep 3
-
+          sleep 5
           VIDEO_URL=$(gh api repos/${{ github.repository }}/releases/tags/tiktok-video \
             --jq '.assets[0].browser_download_url')
-
-          if [ -z "$VIDEO_URL" ]; then
+          if [ -z "$VIDEO_URL" ] || [ "$VIDEO_URL" = "null" ]; then
             echo "❌ Gagal mendapatkan URL video dari release"
             exit 1
           fi
+          echo "VIDEO_URL=${VIDEO_URL}" >> $GITHUB_ENV
+          echo "✅ URL video: ${VIDEO_URL}"
 
-          echo "VIDEO_URL=$VIDEO_URL" >> $GITHUB_ENV
-          echo "✅ URL video: $VIDEO_URL"
-
-      # ─────────────────────────────────────────────
-      # TikTok: Post via Buffer API (auto tayang 2 menit)
-      # ─────────────────────────────────────────────
       - name: Upload TikTok via Buffer API
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
         env:
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           BUFFER_CHANNEL_ID: "6a2032d8c687a22dd457622f"
+          TIKTOK_CAPTION: ${{ github.event.inputs.tiktok_description }}
+          VIDEO_URL: ${{ env.VIDEO_URL }}
         run: |
           set -e
-
-          CAPTION="${{ github.event.inputs.tiktok_description }}"
-          DUE_AT=$(date -u -d '+1 minutes' '+%Y-%m-%dT%H:%M:%S.000Z')
-
           echo "📤 Mengirim ke Buffer API..."
-          echo "📅 Jadwal tayang: $DUE_AT"
-          echo "🎬 Video URL: $VIDEO_URL"
+      
+          python3 <<'PYEOF'
+          import os
+          import json
+          import sys
+          import urllib.request
+          import urllib.error
+          from datetime import datetime, timezone, timedelta
+      
+          api_key    = os.environ["BUFFER_API_KEY"]
+          channel_id = os.environ["BUFFER_CHANNEL_ID"]
+          video_url  = os.environ["VIDEO_URL"]
+          caption    = os.environ.get("TIKTOK_CAPTION", "")
+      
+          due_at = (
+              datetime.now(timezone.utc)
+              + timedelta(minutes=1)
+          ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+      
+          print(f"📅 Jadwal tayang : {due_at}")
+          print(f"🎬 Video URL     : {video_url}")
+      
+          mutation = """
+          mutation {
+            createPost(input: {
+              text: %(caption)s
+              channelId: %(channel_id)s
+              schedulingType: automatic
+              mode: customScheduled
+              dueAt: %(due_at)s
+              assets: [{ video: { url: %(video_url)s } }]
+            }) {
+              ... on PostActionSuccess {
+                post { id dueAt }
+              }
+              ... on MutationError {
+                message
+              }
+            }
+          }
+          """ % {
+              "caption": json.dumps(caption),
+              "channel_id": json.dumps(channel_id),
+              "due_at": json.dumps(due_at),
+              "video_url": json.dumps(video_url),
+          }
+      
+          payload = json.dumps({"query": mutation}).encode("utf-8")
+      
+          req = urllib.request.Request(
+              "https://api.buffer.com",
+              data=payload,
+              headers={
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer " + api_key,
+              }
+          )
+      
+          try:
+              with urllib.request.urlopen(req) as res:
+                  body = json.loads(res.read().decode("utf-8"))
+          except urllib.error.HTTPError as e:
+              print(f"HTTP Error {e.code}: {e.read().decode()}")
+              sys.exit(1)
+      
+          print(json.dumps(body, indent=2))
+          PYEOF
 
-          RESPONSE=$(curl -s -X POST https://api.buffer.com \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${BUFFER_API_KEY}" \
-            -d "{
-              \"query\": \"mutation { createPost(input: { text: \\\"${CAPTION}\\\", channelId: \\\"${BUFFER_CHANNEL_ID}\\\", schedulingType: automatic, mode: customScheduled, dueAt: \\\"${DUE_AT}\\\", assets: [{ video: { url: \\\"${VIDEO_URL}\\\" } }] }) { ... on PostActionSuccess { post { id dueAt } } ... on MutationError { message } } }\"
-            }")
-
-          echo "Response Buffer: $RESPONSE"
-
-          if echo "$RESPONSE" | grep -q '"id"'; then
-            POST_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['createPost']['post']['id'])")
-            POST_DUE=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['createPost']['post']['dueAt'])")
-            echo "✅ BERHASIL! Post ID: $POST_ID"
-            echo "✅ Tayang otomatis: $POST_DUE"
-          else
-            echo "❌ GAGAL posting ke TikTok via Buffer"
-            echo "Response: $RESPONSE"
-            exit 1
-          fi
-
-      # ─────────────────────────────────────────────
-      # Done
-      # ─────────────────────────────────────────────
       - name: Finished
         run: |
           echo "🎉 All tasks completed"
