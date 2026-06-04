@@ -252,12 +252,12 @@ jobs:
           set -e
           echo "🗑️ Mengecek release lama..."
           RELEASE_ID=$(gh api repos/${{ github.repository }}/releases \
-            --jq '.[] | select(.tag_name == "tiktok-video") | .id' 2>/dev/null || echo "")
+            --jq '.[] | select(.tag_name == "tiktok_video") | .id' 2>/dev/null || echo "")
           if [ -n "$RELEASE_ID" ]; then
             echo "Menghapus release ID: $RELEASE_ID"
             gh api -X DELETE repos/${{ github.repository }}/releases/$RELEASE_ID
             sleep 2
-            gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/tiktok-video || true
+            gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/tiktok_video || true
             sleep 2
             echo "✅ Release lama dihapus"
           else
@@ -269,7 +269,7 @@ jobs:
         id: release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: tiktok-video
+          tag_name: tiktok_video
           name: TikTok Video (hosting sementara)
           body: "Hosting sementara untuk Buffer API. Otomatis diganti di run berikutnya."
           files: ${{ env.OUTPUT_FILE }}
@@ -283,7 +283,7 @@ jobs:
         run: |
           set -e
           sleep 5
-          VIDEO_URL=$(gh api repos/${{ github.repository }}/releases/tags/tiktok-video \
+          VIDEO_URL=$(gh api repos/${{ github.repository }}/releases/tags/tiktok_video \
             --jq '.assets[0].browser_download_url')
           if [ -z "$VIDEO_URL" ] || [ "$VIDEO_URL" = "null" ]; then
             echo "❌ Gagal mendapatkan URL video dari release"
