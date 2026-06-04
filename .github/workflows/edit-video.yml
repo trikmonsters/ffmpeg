@@ -402,7 +402,7 @@ jobs:
           set -e
 
           CAPTION="${{ github.event.inputs.tiktok_description }}"
-          DUE_AT=$(date -u -d '+2 minutes' '+%Y-%m-%dT%H:%M:%S.000Z')
+          DUE_AT=$(date -u -d '+1 minutes' '+%Y-%m-%dT%H:%M:%S.000Z')
 
           echo "📤 Mengirim ke Buffer API..."
           echo "📅 Jadwal tayang: $DUE_AT"
