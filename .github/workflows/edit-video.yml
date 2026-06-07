@@ -176,28 +176,24 @@ jobs:
           if [ "$LOGO_EXISTS" = "true" ]; then
 
             case "$POSISI" in
-              "top-left")     OVERLAY_X="$MARGIN";       OVERLAY_Y="$MARGIN" ;;
-              "top-center")   OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
-              "top-right")    OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="$MARGIN" ;;
-              "bottom-left")  OVERLAY_X="$MARGIN";       OVERLAY_Y="H-h-$MARGIN" ;;
-              "bottom-center") OVERLAY_X="(W-w)/2";      OVERLAY_Y="H-h-$MARGIN" ;;
-              "bottom-right") OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="H-h-$MARGIN" ;;
-              *)              OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
+              top-left)     OVERLAY_X="$MARGIN";       OVERLAY_Y="$MARGIN" ;;
+              top-center)   OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
+              top-right)    OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="$MARGIN" ;;
+              bottom-left)  OVERLAY_X="$MARGIN";       OVERLAY_Y="H-h-$MARGIN" ;;
+              bottom-center) OVERLAY_X="(W-w)/2";      OVERLAY_Y="H-h-$MARGIN" ;;
+              bottom-right) OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="H-h-$MARGIN" ;;
+              *)            OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
             esac
 
             ffmpeg -y \
               -i input_video.mp4 \
               -i logo_ready.png \
               -i media/transisi/GJ.mp4 \
-              -filter_complex "\
-              [0:v]scale=1440:2560:flags=lanczos,\
-              setpts=PTS/1.1,\
-              unsharp=5:5:2.0:5:5:0.7,\
-              eq=contrast=1.40:brightness=0.05:saturation=1.10:gamma=1.05,\
-              format=yuv420p[base];\
+              -filter_complex \
+              "[0:v]scale=1440:2560:flags=lanczos,setsar=1,setpts=PTS/1.1,unsharp=5:5:2.0:5:5:0.7,eq=contrast=1.40:brightness=0.05:saturation=1.10:gamma=1.05,format=yuv420p[base];\
               [base][1:v]overlay=${OVERLAY_X}:${OVERLAY_Y}[mainv];\
               [0:a]atempo=1.1,loudnorm=I=-14:LRA=11:TP=-1.5[maina];\
-              [2:v]scale=1440:2560:flags=lanczos,format=yuv420p,setpts=PTS-STARTPTS[tv];\
+              [2:v]scale=1440:2560:flags=lanczos,setsar=1,format=yuv420p,setpts=PTS-STARTPTS[tv];\
               [2:a]asetpts=PTS-STARTPTS[ta];\
               [mainv][maina][tv][ta]concat=n=2:v=1:a=1[vout][aout]" \
               -map "[vout]" \
@@ -221,13 +217,10 @@ jobs:
             ffmpeg -y \
               -i input_video.mp4 \
               -i media/transisi/GJ.mp4 \
-              -filter_complex "\
-              [0:v]scale=1440:2560:flags=lanczos,\
-              setpts=PTS/1.1,\
-              eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95,\
-              format=yuv420p[mainv];\
+              -filter_complex \
+              "[0:v]scale=1440:2560:flags=lanczos,setsar=1,setpts=PTS/1.1,eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95,format=yuv420p[mainv];\
               [0:a]atempo=1.1,loudnorm=I=-14:LRA=11:TP=-1.5[maina];\
-              [1:v]scale=1440:2560:flags=lanczos,format=yuv420p,setpts=PTS-STARTPTS[tv];\
+              [1:v]scale=1440:2560:flags=lanczos,setsar=1,format=yuv420p,setpts=PTS-STARTPTS[tv];\
               [1:a]asetpts=PTS-STARTPTS[ta];\
               [mainv][maina][tv][ta]concat=n=2:v=1:a=1[vout][aout]" \
               -map "[vout]" \
@@ -328,54 +321,41 @@ jobs:
         run: |
           set -e
           echo "📤 Sending to Buffer API..."
-
-          python3 <<'PYEOF'
+          python3 - <<'PYEOF'
           import os
           import json
           import sys
           import urllib.request
           import urllib.error
           from datetime import datetime, timezone, timedelta
-
+          
           api_key = os.environ["BUFFER_API_KEY"]
           channel_id = os.environ["BUFFER_CHANNEL_ID"]
           video_url = os.environ["VIDEO_URL"]
           caption = os.environ.get("TIKTOK_CAPTION", "")
-
+          
           due_at = (
-              datetime.now(timezone.utc)
-              + timedelta(minutes=1)
+              datetime.now(timezone.utc) + timedelta(minutes=1)
           ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
+          
           print(f"📅 Scheduled time : {due_at}")
           print(f"🎬 Video URL      : {video_url}")
-
-          mutation = """
-          mutation {
-            createPost(input: {
-              text: %(caption)s
-              channelId: %(channel_id)s
-              schedulingType: queue
-              dueAt: %(due_at)s
-              assets: [{ video: { url: %(video_url)s } }]
-            }) {
-              ... on PostActionSuccess {
-                post { id dueAt }
-              }
-              ... on MutationError {
-                message
-              }
-            }
-          }
-          """ % {
-              "caption": json.dumps(caption),
-              "channel_id": json.dumps(channel_id),
-              "due_at": json.dumps(due_at),
-              "video_url": json.dumps(video_url),
-          }
-
+          
+          mutation = (
+              "mutation { createPost(input: {"
+              "  text: " + json.dumps(caption) +
+              "  channelId: " + json.dumps(channel_id) +
+              "  schedulingType: queue"
+              "  dueAt: " + json.dumps(due_at) +
+              "  assets: [{ video: { url: " + json.dumps(video_url) + " } }]"
+              "}) {"
+              "  ... on PostActionSuccess { post { id dueAt } }"
+              "  ... on MutationError { message }"
+              "} }"
+          )
+          
           payload = json.dumps({"query": mutation}).encode("utf-8")
-
+          
           req = urllib.request.Request(
               "https://api.buffer.com/graphql",
               data=payload,
@@ -384,14 +364,14 @@ jobs:
                   "Authorization": "Bearer " + api_key,
               }
           )
-
+          
           try:
               with urllib.request.urlopen(req) as res:
                   body = json.loads(res.read().decode("utf-8"))
           except urllib.error.HTTPError as e:
               print(f"HTTP Error {e.code}: {e.read().decode()}")
               sys.exit(1)
-
+          
           print(json.dumps(body, indent=2))
           PYEOF
 
