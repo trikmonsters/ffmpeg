@@ -285,15 +285,13 @@ jobs:
 
       - name: Upload video to GitHub Release
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
-        id: release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: tiktok_video
-          name: TikTok Video (temporary hosting)
-          body: "Temporary hosting for Buffer API. Automatically replaced on next run."
-          files: ${{ env.OUTPUT_FILE }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          echo "📦 Creating GitHub release..."
+          gh release create tiktok_video             --repo "${{ github.repository }}"             --title "TikTok Video (temporary hosting)"             --notes "Temporary hosting for Buffer API. Automatically replaced on next run."             "${{ env.OUTPUT_FILE }}"
+          echo "✅ Release created successfully" 
 
       - name: Get video URL from release
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
