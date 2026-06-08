@@ -1,10 +1,10 @@
-name: Download Video (Fix No Cookies)
+name: Download Video via Node.js
 
 on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'Masukkan URL Video (YT/TikTok/FB/dll)'
+        description: 'Masukkan URL YouTube'
         required: true
         type: string
 
@@ -13,33 +13,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: 20
 
-    - name: Install FFmpeg
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ffmpeg
+    - name: Install Downloader CLI
+      run: npm install -g @distube/ytdl-core --unsafe-perm
 
-    - name: Install yt-dlp Versi Terbaru
-      run: |
-        sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
-        sudo chmod a+rx /usr/local/bin/yt-dlp
-
-    - name: Proses Download Video
+    - name: Download Video
       run: |
         mkdir downloads
         cd downloads
-        
-        # Trik bypass: Menggunakan extractor client ios dan mweb serta menerapkan geo-bypass
-        yt-dlp -f "b[ext=mp4]/b" \
-          --extractor-args "youtube:player_client=ios,mweb" \
-          --geo-bypass \
-          "${{ github.event.inputs.video_url }}"
+        # Mengunduh menggunakan cli ytdl
+        ytdl "${{ github.event.inputs.video_url }}" --quality highest -o video.mp4
 
-    -
+    
