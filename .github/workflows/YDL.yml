@@ -1,10 +1,10 @@
-name: Download Video via Node.js
+name: Download Video OAuth
 
 on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'Masukkan URL YouTube'
+        description: 'Masukkan URL Video (YT/TikTok/FB/dll)'
         required: true
         type: string
 
@@ -13,19 +13,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: 20
 
-    - name: Install Downloader CLI
-      run: npm install -g @distube/ytdl-core --unsafe-perm
+    - name: Install FFmpeg
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
 
-    - name: Download Video
+    - name: Install yt-dlp Versi Terbaru
+      run: |
+        sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
+        sudo chmod a+rx /usr/local/bin/yt-dlp
+
+    - name: Proses Download Video
       run: |
         mkdir downloads
         cd downloads
-        # Mengunduh menggunakan cli ytdl
-        ytdl "${{ github.event.inputs.video_url }}" --quality highest -o video.mp4
+        
+        # Menggunakan argumen oauth untuk verifikasi akun instan tanpa cookies
+        yt-dlp -f "b[ext=mp4]/b" \
+          --username "oauth" \
+          --password "" \
+          "${{ github.event.inputs.video_url }}"
 
     
