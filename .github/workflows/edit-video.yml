@@ -1,4 +1,4 @@
-name: Video Editor + Multi Platform Upload
+name: Video Editor + Multi Platform Upload (Max Quality Boost)
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -6,81 +6,65 @@ env:
 on:
   workflow_dispatch:
     inputs:
-
       video_url:
         description: 'Source video URL'
         required: true
-
       output_filename:
         description: 'Output filename (without .mp4)'
         required: true
         default: 'video-001'
-
       logo_image_url:
         description: 'Logo image URL'
         required: false
         default: ''
-
       logo_width:
         description: 'Logo width'
         required: false
         default: '200'
-
       logo_position:
         description: 'Logo position (top-left, top-center, top-right, bottom-left, bottom-center, bottom-right)'
         required: false
         default: 'top-center'
-
       logo_opacity:
         description: 'Logo opacity'
         required: false
         default: '0.9'
-
       logo_margin:
         description: 'Logo margin'
         required: false
         default: '20'
-
       post_title:
         description: 'Post title'
         required: true
         default: 'My Short Video'
-
       post_description:
         description: 'Post description'
         required: false
         default: 'Check this out!'
-
       post_tags:
         description: 'Tags'
         required: false
         default: 'shorts,viral,fyp'
-
       tiktok_description:
         description: 'TikTok caption'
         required: false
         default: 'Cool video! #fyp #viral'
-
       upload_youtube:
         description: 'Upload to YouTube'
         required: false
         default: 'true'
-
       upload_facebook:
         description: 'Upload to Facebook'
         required: false
         default: 'true'
-
       upload_tiktok:
         description: 'Upload to TikTok'
         required: false
         default: 'true'
-
       fb_access_token:
         description: 'Facebook Access Token'
         required: false
         default: ''
-
       fb_page_id:
         description: 'Facebook Page ID'
         required: false
@@ -94,20 +78,30 @@ jobs:
       contents: write
 
     steps:
-
+      # Optimasi 1: Shallow Clone (Hanya ambil commit terakhir)
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
+      # Optimasi 2: Cache Pip Packages agar tidak download ulang library python
+      - name: Cache Pip Packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # Optimasi 3: Hapus apt-get update & install ffmpeg (Pakai FFmpeg bawaan Runner)
       - name: Install dependencies
         run: |
           set -e
-          sudo apt-get update -y
-          sudo apt-get install -y ffmpeg
           pip install \
             google-auth \
             google-auth-oauthlib \
@@ -116,7 +110,7 @@ jobs:
             requests \
             Pillow
           ffmpeg -version | head -1
-          echo "✅ Dependencies installed"
+          echo "✅ Dependencies installed instantly"
 
       - name: Prepare workspace
         run: |
@@ -161,6 +155,7 @@ jobs:
             --width "${{ github.event.inputs.logo_width }}" \
             --opacity "${{ github.event.inputs.logo_opacity }}"
 
+      # KODE RENDERING DIKEMBALIKAN KE KUALITAS MAKSIMAL PILIHANMU (H.265 / Lanczos / Medium)
       - name: Edit video
         run: |
           set -e
@@ -171,18 +166,18 @@ jobs:
           LOGO_EXISTS=false
           [ -f "logo_ready.png" ] && LOGO_EXISTS=true
 
-          echo "🎬 Processing video..."
+          echo "🎬 Processing video in Max Quality Mode..."
 
           if [ "$LOGO_EXISTS" = "true" ]; then
 
             case "$POSISI" in
-              top-left)     OVERLAY_X="$MARGIN";       OVERLAY_Y="$MARGIN" ;;
-              top-center)   OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
-              top-right)    OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="$MARGIN" ;;
-              bottom-left)  OVERLAY_X="$MARGIN";       OVERLAY_Y="H-h-$MARGIN" ;;
+              top-left)      OVERLAY_X="$MARGIN";       OVERLAY_Y="$MARGIN" ;;
+              top-center)    OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
+              top-right)     OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="$MARGIN" ;;
+              bottom-left)   OVERLAY_X="$MARGIN";       OVERLAY_Y="H-h-$MARGIN" ;;
               bottom-center) OVERLAY_X="(W-w)/2";      OVERLAY_Y="H-h-$MARGIN" ;;
-              bottom-right) OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="H-h-$MARGIN" ;;
-              *)            OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
+              bottom-right)  OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="H-h-$MARGIN" ;;
+              *)             OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
             esac
 
             ffmpeg -y \
@@ -290,7 +285,11 @@ jobs:
         run: |
           set -e
           echo "📦 Creating GitHub release..."
-          gh release create tiktok_video             --repo "${{ github.repository }}"             --title "TikTok Video (temporary hosting)"             --notes "Temporary hosting for Buffer API. Automatically replaced on next run."             "${{ env.OUTPUT_FILE }}"
+          gh release create tiktok_video \
+            --repo "${{ github.repository }}" \
+            --title "TikTok Video (temporary hosting)" \
+            --notes "Temporary hosting for Buffer API. Automatically replaced on next run." \
+            "${{ env.OUTPUT_FILE }}"
           echo "✅ Release created successfully" 
 
       - name: Get video URL from release
