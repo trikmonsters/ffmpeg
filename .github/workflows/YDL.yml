@@ -1,4 +1,4 @@
-name: Download Video
+name: Download Video via Cobalt
 
 on:
   workflow_dispatch:
@@ -13,28 +13,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. Checkout repositori (opsional, tapi bagus untuk struktur)
-    - name: Checkout Code
-      uses: actions/checkout@v4
-
-    # 2. Install FFmpeg (wajib untuk menggabungkan video & audio kualitas tinggi)
-    - name: Install FFmpeg
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ffmpeg
-
-    # 3. Install yt-dlp versi terbaru
-    - name: Install yt-dlp
-      run: |
-        sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
-        sudo chmod a+rx /usr/local/bin/yt-dlp
-
-    # 4. Proses Download Video
-    - name: Download Video via yt-dlp
+    - name: Download Video menggunakan Cobalt API
       run: |
         mkdir downloads
         cd downloads
-        # Format mp4 otomatis mencari kualitas terbaik yang menggabungkan video+audio
-        yt-dlp -f "b[ext=mp4]/b" "${{ github.event.inputs.video_url }}"
+        
+        echo "Mengirim request ke API Cobalt..."
+        # Meminta link download mentah dari API Cobalt
+        RESPONSE=$(curl -s -X POST "https://api.cobalt.tools/api/json" \
+          -H "Content-Type: application/json" \
+          -H "Accept: application/json" \
+          -d "{\"url\": \"${{ github.event.inputs.video_url }}\", \"vQuality\": \"720\"}")
+        
+        # Mengambil URL video hasil ekstraksi
+        DOWNLOAD_URL=$(echo $RESPONSE | grep -o '"url":"[^"]*' | grep -o '[^"]*$')
+        
+        if [ -z "$DOWNLOAD_URL" ]; then
+          echo "Gagal mengambil video. Respon dari server: $RESPONSE"
+          exit 1
+        fi
+        
+        echo "Mendownload file video asli..."
+        # Mengunduh video asli dengan nama video.mp4
+        curl -L -o "video.mp4" "$DOWNLOAD_URL"
 
-    
+  
