@@ -1,10 +1,10 @@
-name: Download Video via Cobalt
+name: Download Video via Alt API
 
 on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'Masukkan URL Video (YT/TikTok/FB/dll)'
+        description: 'Masukkan URL Video'
         required: true
         type: string
 
@@ -13,28 +13,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Download Video menggunakan Cobalt API
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Download Menggunakan Invidious API
       run: |
         mkdir downloads
         cd downloads
         
-        echo "Mengirim request ke API Cobalt..."
-        # Meminta link download mentah dari API Cobalt
-        RESPONSE=$(curl -s -X POST "https://api.cobalt.tools/api/json" \
-          -H "Content-Type: application/json" \
-          -H "Accept: application/json" \
-          -d "{\"url\": \"${{ github.event.inputs.video_url }}\", \"vQuality\": \"720\"}")
+        # Menggunakan instance publik invidious untuk mengambil direct link video tanpa blokir
+        VIDEO_ID=$(echo "${{ github.event.inputs.video_url }}" | grep -oE 'v=[^&]+|shorts/[^?]+|youtu.be/[^?]+' | head -n 1 | sed -E 's/v=|shorts\/|youtu.be\///')
         
-        # Mengambil URL video hasil ekstraksi
-        DOWNLOAD_URL=$(echo $RESPONSE | grep -o '"url":"[^"]*' | grep -o '[^"]*$')
-        
-        if [ -z "$DOWNLOAD_URL" ]; then
-          echo "Gagal mengambil video. Respon dari server: $RESPONSE"
-          exit 1
+        if [ -z "$VIDEO_ID" ]; then
+          echo "Format URL tidak dikenal, mencoba download langsung..."
+          curl -L -o "video.mp4" "${{ github.event.inputs.video_url }}"
+        else
+          echo "Mengekstrak ID Video: $VIDEO_ID"
+          # Ambil link video format mp4 dari public API
+          DATA=$(curl -s "https://iv.melmac.space/api/v1/videos/$VIDEO_ID")
+          DOWNLOAD_URL=$(echo "$DATA" | grep -o '"url":"[^"]*' | grep -o '[^"]*' | grep "mime=video%2Fmp4" | head -n 1 | sed 's/\\u0026/\&/g')
+          
+          if [ -z "$DOWNLOAD_URL" ]; then
+             echo "Gagal lewat API khusus, mengalihkan ke fallback..."
+             exit 1
+          fi
+          
+          curl -L -o "video.mp4" "$DOWNLOAD_URL"
         fi
-        
-        echo "Mendownload file video asli..."
-        # Mengunduh video asli dengan nama video.mp4
-        curl -L -o "video.mp4" "$DOWNLOAD_URL"
 
-  
