@@ -343,7 +343,8 @@ jobs:
               "mutation { createPost(input: {"
               "  text: " + json.dumps(caption) +
               "  channelId: " + json.dumps(channel_id) +
-              "  schedulingType: queue"
+              "  schedulingType: automatic"
+              "  mode: customScheduled"
               "  dueAt: " + json.dumps(due_at) +
               "  assets: [{ video: { url: " + json.dumps(video_url) + " } }]"
               "}) {"
