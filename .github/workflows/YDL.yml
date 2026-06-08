@@ -1,10 +1,10 @@
-name: Download Video via Alt API
+name: Download Video (Fix No Cookies)
 
 on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'Masukkan URL Video'
+        description: 'Masukkan URL Video (YT/TikTok/FB/dll)'
         required: true
         type: string
 
@@ -16,28 +16,30 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Download Menggunakan Invidious API
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Install FFmpeg
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+
+    - name: Install yt-dlp Versi Terbaru
+      run: |
+        sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
+        sudo chmod a+rx /usr/local/bin/yt-dlp
+
+    - name: Proses Download Video
       run: |
         mkdir downloads
         cd downloads
         
-        # Menggunakan instance publik invidious untuk mengambil direct link video tanpa blokir
-        VIDEO_ID=$(echo "${{ github.event.inputs.video_url }}" | grep -oE 'v=[^&]+|shorts/[^?]+|youtu.be/[^?]+' | head -n 1 | sed -E 's/v=|shorts\/|youtu.be\///')
-        
-        if [ -z "$VIDEO_ID" ]; then
-          echo "Format URL tidak dikenal, mencoba download langsung..."
-          curl -L -o "video.mp4" "${{ github.event.inputs.video_url }}"
-        else
-          echo "Mengekstrak ID Video: $VIDEO_ID"
-          # Ambil link video format mp4 dari public API
-          DATA=$(curl -s "https://iv.melmac.space/api/v1/videos/$VIDEO_ID")
-          DOWNLOAD_URL=$(echo "$DATA" | grep -o '"url":"[^"]*' | grep -o '[^"]*' | grep "mime=video%2Fmp4" | head -n 1 | sed 's/\\u0026/\&/g')
-          
-          if [ -z "$DOWNLOAD_URL" ]; then
-             echo "Gagal lewat API khusus, mengalihkan ke fallback..."
-             exit 1
-          fi
-          
-          curl -L -o "video.mp4" "$DOWNLOAD_URL"
-        fi
+        # Trik bypass: Menggunakan extractor client ios dan mweb serta menerapkan geo-bypass
+        yt-dlp -f "b[ext=mp4]/b" \
+          --extractor-args "youtube:player_client=ios,mweb" \
+          --geo-bypass \
+          "${{ github.event.inputs.video_url }}"
 
+    -
