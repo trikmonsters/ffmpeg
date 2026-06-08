@@ -1,0 +1,19 @@
+name: Download YouTube Video
+
+on:
+  workflow_dispatch:  # Bisa dijalankan manual dari GitHub
+    inputs:
+      url:
+        description: 'YouTube URL'
+        required: true
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup yt-dlp
+        uses: AnimMouse/setup-yt-dlp@v3  # Auto install yt-dlp + ffmpeg [citation:3]
+
+      - name: Download video
+        run: |
+          yt-dlp -f "best[height<=720]" "${{ inputs.url }}"
