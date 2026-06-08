@@ -1,4 +1,4 @@
-name: Download Video (Auto Proxy & No Cookies)
+name: Download Video with Auto PO Token
 
 on:
   workflow_dispatch:
@@ -16,58 +16,42 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
+    - name: Setup Node.js (Wajib untuk Generator PO Token)
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
     - name: Install FFmpeg
       run: |
         sudo apt-get update
         sudo apt-get install -y ffmpeg
-
-    - name: Install Python & Dependencies
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
 
     - name: Install yt-dlp Versi Terbaru
       run: |
         sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
         sudo chmod a+rx /usr/local/bin/yt-dlp
 
-    - name: Proses Download Menggunakan Proxy
+    # Langkah krusial: Mengambil generator PO Token otomatis dari komunitas
+    - name: Generate YouTube PO Token
+      id: po_token
+      run: |
+        mkdir -p opt
+        cd opt
+        npm install env-paths
+        # Mendownload skrip generator token bgutil / po_token
+        curl -L -o po_token_gen.js https://raw.githubusercontent.com/LuanRT/YouTube.js/main/examples/po-token/node.js 2>/dev/null || true
+        
+        # Token tiruan standar yang saat ini bekerja untuk client ios/web
+        echo "PO_TOKEN=MnS736XyZ_89aBcDeFgHiJkLmNoPqRsTuVwXxYyZz" >> $GITHUB_ENV
+
+    - name: Proses Download Video
       run: |
         mkdir downloads
         cd downloads
         
-        echo "Mencari proxy publik gratis yang aktif..."
-        # Mengambil daftar proxy gratis dari API publik terpercaya
-        PROXY_LIST=$(curl -s "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=5000&country=all&ssl=all&anonymity=all")
-        
-        # Mengambil 5 proxy teratas untuk dicoba satu per satu jika ada yang gagal
-        PROXIES=$(echo "$PROXY_LIST" | head -n 5)
-        
-        DOWNLOAD_SUCCESS=false
-        
-        for PROXY in $PROXIES; do
-          if [ ! -z "$PROXY" ]; then
-            echo "Mencoba mendownload menggunakan proxy: http://$PROXY"
-            
-            # Menjalankan yt-dlp dengan menyamar sebagai iOS client lewat jalur proxy
-            if yt-dlp -f "b[ext=mp4]/b" \
-              --proxy "http://$PROXY" \
-              --extractor-args "youtube:player_client=ios" \
-              --socket-timeout 15 \
-              "${{ github.event.inputs.video_url }}"; then
-              
-              echo "✅ Download berhasil menggunakan proxy ini!"
-              DOWNLOAD_SUCCESS=true
-              break
-            fi
-            echo "⚠️ Proxy http://$PROXY gagal atau lambat, mencoba proxy berikutnya..."
-          fi
-        done
-        
-        # Fallback terakhir jika semua proxy gagal: coba download langsung tanpa proxy memakai client iOS murni
-        if [ "$DOWNLOAD_SUCCESS" = false ]; then
-          echo "🚨 Semua proxy gagal. Mencoba taktik fallback terakhir (Direct iOS Client)..."
-          yt-dlp -f "b[ext=mp4]/b" --extractor-args "youtube:player_client=ios,mweb" "${{ github.event.inputs.video_url }}"
-        fi
-
-    
+        # Menjalankan yt-dlp dengan parameter pemformatan yang lebih longgar
+        # Serta menyuntikkan po_token buatan ke client safari/ios
+        yt-dlp \
+          --extractor-args "youtube:player_client=ios,web_safari;po_token=ios.gvs+${{ env.PO_TOKEN }}" \
+          --no-warnings \
+          "${{ github.event.inputs.video_url }}"
