@@ -1,4 +1,4 @@
-name: Download Video Universal API
+name: Download Video (Auto Proxy & No Cookies)
 
 on:
   workflow_dispatch:
@@ -16,43 +16,58 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Download Video via Public API Engine
+    - name: Install FFmpeg
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+
+    - name: Install Python & Dependencies
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install yt-dlp Versi Terbaru
+      run: |
+        sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
+        sudo chmod a+rx /usr/local/bin/yt-dlp
+
+    - name: Proses Download Menggunakan Proxy
       run: |
         mkdir downloads
         cd downloads
         
-        echo "Mengirim permintaan konversi video..."
+        echo "Mencari proxy publik gratis yang aktif..."
+        # Mengambil daftar proxy gratis dari API publik terpercaya
+        PROXY_LIST=$(curl -s "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=5000&country=all&ssl=all&anonymity=all")
         
-        # Menggunakan API publik pihak ketiga untuk bypass enkripsi YouTube/TikTok/FB
-        # API ini mengembalikan direct link video mp4 kualitas terbaik
-        API_REQ=$(curl -s -X POST "https://api.v02.savethevideo.com/tasks" \
-          -H "Content-Type: application/json" \
-          -d "{\"url\": \"${{ github.event.inputs.video_url }}\"}")
+        # Mengambil 5 proxy teratas untuk dicoba satu per satu jika ada yang gagal
+        PROXIES=$(echo "$PROXY_LIST" | head -n 5)
         
-        # Mengambil ID Task untuk pengecekan status download
-        TASK_ID=$(echo "$API_REQ" | grep -o '"id":"[^"]*' | grep -o '[^"]*$')
+        DOWNLOAD_SUCCESS=false
         
-        if [ -z "$TASK_ID" ]; then
-          echo "Gagal menginisiasi download. Mencoba API Cadangan..."
-          # API Cadangan jika API utama sibuk
-          DOWNLOAD_URL=$(curl -s "https://api.dandi.link/api/download?url=${{ github.event.inputs.video_url }}" | grep -o '"download_url":"[^"]*' | grep -o '[^"]*$')
-        else
-          echo "Menunggu server memproses video (Task ID: $TASK_ID)..."
-          sleep 5
-          
-          # Mengambil link unduhan final dari hasil pemrosesan task
-          DOWNLOAD_URL=$(curl -s "https://api.v02.savethevideo.com/tasks/$TASK_ID" | grep -o '"url":"[^"]*' | grep -o '[^"]*$' | head -n 1)
+        for PROXY in $PROXIES; do
+          if [ ! -z "$PROXY" ]; then
+            echo "Mencoba mendownload menggunakan proxy: http://$PROXY"
+            
+            # Menjalankan yt-dlp dengan menyamar sebagai iOS client lewat jalur proxy
+            if yt-dlp -f "b[ext=mp4]/b" \
+              --proxy "http://$PROXY" \
+              --extractor-args "youtube:player_client=ios" \
+              --socket-timeout 15 \
+              "${{ github.event.inputs.video_url }}"; then
+              
+              echo "✅ Download berhasil menggunakan proxy ini!"
+              DOWNLOAD_SUCCESS=true
+              break
+            fi
+            echo "⚠️ Proxy http://$PROXY gagal atau lambat, mencoba proxy berikutnya..."
+          fi
+        done
+        
+        # Fallback terakhir jika semua proxy gagal: coba download langsung tanpa proxy memakai client iOS murni
+        if [ "$DOWNLOAD_SUCCESS" = false ]; then
+          echo "🚨 Semua proxy gagal. Mencoba taktik fallback terakhir (Direct iOS Client)..."
+          yt-dlp -f "b[ext=mp4]/b" --extractor-args "youtube:player_client=ios,mweb" "${{ github.event.inputs.video_url }}"
         fi
-        
-        if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-          echo "Error: Gagal mendapatkan link download dari API. Server kemungkinan sedang overload."
-          exit 1
-        fi
-        
-        echo "Link download berhasil didapatkan!"
-        echo "Memulai proses unduhan file video asli..."
-        
-        # Download file video final dan simpan sebagai video.mp4
-        curl -L -o "video.mp4" "$DOWNLOAD_URL"
 
     
