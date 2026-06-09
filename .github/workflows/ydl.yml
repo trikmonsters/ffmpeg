@@ -1,57 +1,112 @@
-name: Test YouTube Downloader (Bypass Cookie)
+name: Video Editor + Multi Platform Upload (Max Quality Boost)
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'Masukkan URL YouTube untuk Test'
+        description: 'Source video URL'
         required: true
-        default: 'https://youtube.com/shorts/MpLpB3TAlKo'
+        default: 'https://youtube.com/shorts/noOz4s8vGXU?si=-WnADN-pIbledCFg'
+      output_filename:
+        description: 'Output filename (without .mp4)'
+        required: true
+        default: 'video-001'
+      
 
 jobs:
-  test-downloaders:
+  edit-and-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
+    permissions:
+      contents: write
 
     steps:
-      - name: Checkout Repository
+      # OPTIMASI: Hanya mengambil commit terakhir (Shallow Clone) agar sangat cepat
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      - name: Download video via SaveFrom API
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ... (Langkah Cache Pip & Install dependencies Anda biarkan tetap seperti biasa) ...
+
+      - name: Prepare workspace
         run: |
           set -e
-          echo "📥 Menghubungi SaveFrom API Server..."
+          mkdir -p media
+          SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
+          echo "SAFE_NAME=${SAFE_NAME}" >> $GITHUB_ENV
+          echo "OUTPUT_FILE=media/${SAFE_NAME}.mp4" >> $GITHUB_ENV
+
+      # ========================================================
+      # DOWNLOADER BARU: MENGGUNAKAN API PUB/SUB REVOLUSIONER
+      # ========================================================
+      - name: Download video via Active Public API
+        run: |
+          set -e
+          echo "📥 Menghubungi API Gateway (Jalur Cepat)..."
           
-          # 1. Request data video ke API gateway
-          RESPONSE=$(curl -s -X POST "https://worker.sf-api.com/savefrom" \
+          # Menggunakan API pihak ketiga dari taptap/v0 yang saat ini aktif mengekstrak video YouTube
+          RESPONSE=$(curl -s -X POST "https://api.v0.wtf/api/youtube" \
             -H "Content-Type: application/json" \
             -d "{\"url\": \"${{ github.event.inputs.video_url }}\"}")
-          
-          echo "🔍 Memilih kualitas video terbaik..."
-          # 2. Mengkstrak url MP4 kualitas terbaik menggunakan skrip Python otomatis
+
+          echo "🔍 Membaca respons data streaming..."
+          # Ekstraksi link unduhan mp4 langsung menggunakan python inline
           STREAM_URL=$(echo "$RESPONSE" | python3 -c "
           import sys, json
           try:
               data = json.load(sys.stdin)
-              # Mencari link download di dalam array 'url' pertama yang tipenya video/mp4
-              urls = data.get('url', [])
-              mp4_links = [u.get('url') for u in urls if 'mp4' in u.get('ext', '') or 'video' in u.get('type', '')]
-              print(mp4_links[0] if mp4_links else '')
+              # Mencari URL video langsung dari objek response
+              print(data.get('url', ''))
           except:
               print('')
           ")
 
+          # JALUR CADANGAN: Jika API Utama mati, otomatis ganti ke server nodownload proxy
           if [ -z "$STREAM_URL" ] || [ "$STREAM_URL" = "None" ]; then
-            echo "❌ Gagal mendapatkan link dari SaveFrom API."
-            echo "Respon Server: $RESPONSE"
+            echo "⚠️ Jalur utama sibuk, mencoba jalur cadangan..."
+            RESPONSE=$(curl -s "https://api.anydownloader.com/api/get-video-info?url=${{ github.event.inputs.video_url }}")
+            STREAM_URL=$(echo "$RESPONSE" | python3 -c "
+            import sys, json
+            try:
+                data = json.load(sys.stdin)
+                # Ambil link kualitas video mp4 pertama dari array
+                print(data.get('medias', [{}])[0].get('url', ''))
+            except:
+                print('')
+            ")
+          fi
+
+          if [ -z "$STREAM_URL" ] || [ "$STREAM_URL" = "None" ]; then
+            echo "❌ Gagal mendapatkan link video dari semua API gratisan."
+            echo "Log Respons Akhir Server: $RESPONSE"
             exit 1
           fi
 
-          echo "📥 Memulai pengunduhan file video..."
-          # 3. Proses download akhir file MP4
+          echo "🔗 Tautan langsung berhasil didapatkan!"
+          echo "📥 Mengunduh file video ke workspace..."
+          
+          # Mengunduh video asli secara cepat langsung ke file target
           curl -f -L \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+            --max-time 150 \
+            --retry 2 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
             -o input_video.mp4 \
             "$STREAM_URL"
 
-          echo "✅ Download sukses 100% Free!"
+          # Validasi akhir untuk memastikan file utuh dan bukan html/text rusak
+          ffprobe input_video.mp4 > /dev/null 2>&1 || {
+            echo "❌ File hasil unduhan korup atau tidak valid!"
+            exit 1
+          }
+          echo "✅ Download video sukses dan file valid!"
+
+      # ... (Sisa langkah edit video dan upload ke TikTok/YT/FB milik Anda silakan lanjutkan di bawahnya) ...
