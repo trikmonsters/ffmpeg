@@ -93,6 +93,13 @@ jobs:
               f.write(f"direct_url={final_url}\n")
           EOF
 
+
+      - name: Show runner IP
+        run: |
+          curl -s https://api.ipify.org
+          echo
+
+    
       - name: Show URL
         run: |
           echo "========== URL =========="
