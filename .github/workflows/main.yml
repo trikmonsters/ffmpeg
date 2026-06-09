@@ -17,6 +17,15 @@ jobs:
 
       - run: pip install requests
 
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      
+      - name: Check FFmpeg
+        run: |
+          ffmpeg -version
+
       - name: Get Direct URL
         id: geturl
         env:
@@ -97,6 +106,7 @@ jobs:
       - name: Download with ffmpeg
         run: |
           ffmpeg \
+            -loglevel verbose \
             -user_agent "Mozilla/5.0" \
             -i "${{ steps.geturl.outputs.direct_url }}" \
             -c copy \
