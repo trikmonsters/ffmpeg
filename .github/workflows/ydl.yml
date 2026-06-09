@@ -17,114 +17,37 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install FFmpeg (Required for Merging)
+      - name: Download video via Cobalt Alternative Mirror
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
-          ffmpeg -version | head -1
-
-      # ==========================================
-      # METODE 1: YT-DLP DENGAN MOBILE CLIENT BYPASS
-      # ==========================================
-      - name: Test Metode 1 - yt-dlp Mobile Client
-        continue-on-error: true # Agar jika metode 1 gagal, workflow tetap lanjut menguji metode berikutnya
-        run: |
-          echo "=== PENGUJIAN METODE 1: YT-DLP MOBILE CLIENT ==="
-          echo "📥 Memasang yt-dlp versi terbaru..."
-          sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
-          sudo chmod a+rx /usr/local/bin/yt-dlp
-          yt-dlp --version
-
-          echo "📥 Mencoba download video dengan menyamar sebagai iOS/Android Client..."
-          yt-dlp -f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]" \
-            --merge-output-format mp4 \
-            --extractor-args "youtube:player_client=ios,android;skip=dash" \
-            -o "video_metode_1.mp4" \
-            "${{ github.event.inputs.video_url }}"
-
-          echo "🔍 Memeriksa hasil unduhan Metode 1..."
-          if [ -f "video_metode_1.mp4" ]; then
-            ls -lh video_metode_1.mp4
-            echo "✅ METODE 1 BERHASIL SELESAI!"
-          else
-            echo "❌ METODE 1 GAGAL!"
-            exit 1
-          fi
-
-      # ==========================================
-      # METODE 2: INVIDIOUS PROXY (NO COOKIE)
-      # ==========================================
-      - name: Test Metode 2 - Invidious Proxy
-        continue-on-error: true
-        run: |
-          echo "=== PENGUJIAN METODE 2: INVIDIOUS PROXY ==="
+          set -e
+          echo "📥 Meminta direct link dari Cobalt Mirror..."
           
-          ORIGINAL_URL="${{ github.event.inputs.video_url }}"
-          # Mengubah domain ke salah satu public instance Invidious yang populer
-          PROXY_URL=$(echo "$ORIGINAL_URL" | sed -E 's/https:\/\/(www\.)?(youtube\.com|youtu\.be)\//https:\/\/invidious.nerdvpn.de\//')
-          
-          echo "🔗 URL Asli: $ORIGINAL_URL"
-          echo "🔄 URL Proxy: $PROXY_URL"
-
-          echo "📥 Mencoba download via server proxy..."
-          yt-dlp -f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]" \
-            --merge-output-format mp4 \
-            -o "video_metode_2.mp4" \
-            "$PROXY_URL"
-
-          echo "🔍 Memeriksa hasil unduhan Metode 2..."
-          if [ -f "video_metode_2.mp4" ]; then
-            ls -lh video_metode_2.mp4
-            echo "✅ METODE 2 BERHASIL SELESAI!"
-          else
-            echo "❌ METODE 2 GAGAL!"
-            exit 1
-          fi
-
-      # ==========================================
-      # METODE 3: COBALT API (EXTERNAL INFRASTRUCTURE)
-      # ==========================================
-      - name: Test Metode 3 - Cobalt API
-        continue-on-error: true
-        run: |
-          echo "=== PENGUJIAN METODE 3: COBALT API ==="
-          echo "📥 Meminta direct link dari Cobalt..."
-          
-          STREAM_URL=$(curl -s -X POST "https://api.cobalt.tools/api/json" \
+          # Kita gunakan mirror 'co.wuk.sh' atau 'cobalt.lol' yang biasanya lebih longgar
+          STREAM_URL=$(curl -s -X POST "https://co.wuk.sh/api/json" \
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
             -d "{\"url\": \"${{ github.event.inputs.video_url }}\", \"vQuality\": \"1080\"}" \
             | python3 -c "import sys, json; print(json.load(sys.stdin).get('url', ''))")
 
           if [ -z "$STREAM_URL" ] || [ "$STREAM_URL" = "None" ]; then
-            echo "❌ Cobalt API gagal memberikan link stream."
+            echo "❌ Mirror 1 gagal, mencoba Mirror 2..."
+            STREAM_URL=$(curl -s -X POST "https://api.cobalt.lol/api/json" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              -d "{\"url\": \"${{ github.event.inputs.video_url }}\", \"vQuality\": \"1080\"}" \
+              | python3 -c "import sys, json; print(json.load(sys.stdin).get('url', ''))")
+          fi
+
+          if [ -z "$STREAM_URL" ] || [ "$STREAM_URL" = "None" ]; then
+            echo "❌ Semua API Mirror penuh. Disarankan beralih ke Trik 1 (OAuth2)."
             exit 1
           fi
 
-          echo "🔗 Direct Stream URL didapatkan: $STREAM_URL"
-          echo "📥 Mengunduh file video menggunakan curl..."
+          echo "🔗 Direct Link Sukses Didapatkan!"
+          echo "📥 Mengunduh file video..."
           curl -f -L \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
-            -o "video_metode_3.mp4" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            -o input_video.mp4 \
             "$STREAM_URL"
 
-          echo "🔍 Memeriksa hasil unduhan Metode 3..."
-          if [ -f "video_metode_3.mp4" ]; then
-            ls -lh video_metode_3.mp4
-            echo "✅ METODE 3 BERHASIL SELESAI!"
-          else
-            echo "❌ METODE 3 GAGAL!"
-            exit 1
-          fi
-
-      # ==========================================
-      # KESIMPULAN HASIL TEST
-      # ==========================================
-      - name: Summary Evaluation
-        run: |
-          echo "========================================="
-          echo "        HASIL EVALUASI DOWNLOADER        "
-          echo "========================================="
-          [ -f "video_metode_1.mp4" ] && echo "➔ Metode 1 (yt-dlp Mobile): SUKSES 🎉" || echo "➔ Metode 1 (yt-dlp Mobile): GAGAL ❌"
-          [ -f "video_metode_2.mp4" ] && echo "➔ Metode 2 (Invidious):     SUKSES 🎉" || echo "➔ Metode 2 (Invidious):     GAGAL ❌"
-          [ -f "video_metode_3.mp4" ] && echo "➔ Metode 3 (Cobalt API):    SUKSES 🎉" || echo "➔ Metode 3 (Cobalt API):    GAGAL ❌"
-          echo "========================================="
+          echo "✅ Download sukses via Cobalt Mirror!"
