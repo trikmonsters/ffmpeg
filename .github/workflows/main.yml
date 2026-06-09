@@ -94,52 +94,10 @@ jobs:
           EOF
 
 
-      - name: Show runner IP
+      - name: Download with ffmpeg
         run: |
-          curl -s https://api.ipify.org
-          echo
-
-    
-      - name: Show URL
-        run: |
-          echo "========== URL =========="
-          echo "${{ steps.geturl.outputs.direct_url }}"
-          echo "========================="
-
-      - name: Download source video
-        run: |
-          set -e
-      
-          URL="${{ steps.geturl.outputs.direct_url }}"
-      
-          echo "🔍 Testing with GET request..."
-      
-          curl \
-            -L \
-            -A "Mozilla/5.0" \
-            -H "Range: bytes=0-1023" \
-            -o test.bin \
-            "$URL"
-      
-          ls -lh test.bin
-      
-          echo "📥 Downloading source video..."
-      
-          curl \
-            -f \
-            -L \
-            --max-time 300 \
-            --retry 3 \
-            --retry-delay 5 \
-            -A "Mozilla/5.0" \
-            -o input_video.mp4 \
-            "$URL"
-      
-          ffprobe input_video.mp4 > /dev/null 2>&1 || {
-            echo "❌ Invalid video file"
-            exit 1
-          }
-      
-          echo "✅ Download successful"
-      
-          ls -lh input_video.mp4
+          ffmpeg \
+            -user_agent "Mozilla/5.0" \
+            -i "${{ steps.geturl.outputs.direct_url }}" \
+            -c copy \
+            input_video.mp4
