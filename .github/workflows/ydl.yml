@@ -30,65 +30,49 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Download video via Active Public API
+      - name: Download video via AnyDownloader API
         run: |
           set -e
-          echo "📥 Menghubungi API Gateway (Jalur Cepat)..."
+          echo "📥 Menghubungi AnyDownloader API Gateway..."
           
-          # Menggunakan API pihak ketiga dari taptap/v0 yang saat ini aktif mengekstrak video YouTube
-          RESPONSE=$(curl -s -X POST "https://api.v0.wtf/api/youtube" \
-            -H "Content-Type: application/json" \
-            -d "{\"url\": \"${{ github.event.inputs.video_url }}\"}")
-
-          echo "🔍 Membaca respons data streaming..."
-          # Ekstraksi link unduhan mp4 langsung menggunakan python inline
+          # 1. Request data video ke API AnyDownloader
+          RESPONSE=$(curl -s "https://api.anydownloader.com/api/get-video-info?url=${{ github.event.inputs.video_url }}")
+          
+          echo "🔍 Mengekstrak Direct Link MP4..."
+          # 2. Menggunakan Python untuk mengambil URL video pertama dari array 'medias'
           STREAM_URL=$(echo "$RESPONSE" | python3 -c "
           import sys, json
           try:
               data = json.load(sys.stdin)
-              # Mencari URL video langsung dari objek response
-              print(data.get('url', ''))
-          except:
+              # Ambil item pertama dari daftar media yang tersedia
+              print(data.get('medias', [{}])[0].get('url', ''))
+          except Exception:
               print('')
           ")
 
-          # JALUR CADANGAN: Jika API Utama mati, otomatis ganti ke server nodownload proxy
           if [ -z "$STREAM_URL" ] || [ "$STREAM_URL" = "None" ]; then
-            echo "⚠️ Jalur utama sibuk, mencoba jalur cadangan..."
-            RESPONSE=$(curl -s "https://api.anydownloader.com/api/get-video-info?url=${{ github.event.inputs.video_url }}")
-            STREAM_URL=$(echo "$RESPONSE" | python3 -c "
-            import sys, json
-            try:
-                data = json.load(sys.stdin)
-                # Ambil link kualitas video mp4 pertama dari array
-                print(data.get('medias', [{}])[0].get('url', ''))
-            except:
-                print('')
-            ")
-          fi
-
-          if [ -z "$STREAM_URL" ] || [ "$STREAM_URL" = "None" ]; then
-            echo "❌ Gagal mendapatkan link video dari semua API gratisan."
-            echo "Log Respons Akhir Server: $RESPONSE"
+            echo "❌ Gagal mendapatkan link video dari AnyDownloader!"
+            echo "Respon Mentah Server: $RESPONSE"
             exit 1
           fi
 
-          echo "🔗 Tautan langsung berhasil didapatkan!"
+          echo "🔗 Direct Link Berhasil Didapatkan!"
           echo "📥 Mengunduh file video ke workspace..."
           
-          # Mengunduh video asli secara cepat langsung ke file target
+          # 3. Proses download akhir file MP4 menggunakan curl dengan User-Agent normal
           curl -f -L \
             --max-time 150 \
-            --retry 2 \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            --retry 3 \
+            --retry-delay 5 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
             -o input_video.mp4 \
             "$STREAM_URL"
 
-          # Validasi akhir untuk memastikan file utuh dan bukan html/text rusak
+          # 4. Validasi akhir menggunakan ffprobe untuk memastikan file benar-benar video siap edit
           ffprobe input_video.mp4 > /dev/null 2>&1 || {
-            echo "❌ File hasil unduhan korup atau tidak valid!"
+            echo "❌ File hasil unduhan rusak atau bukan format video valid!"
             exit 1
           }
           echo "✅ Download video sukses dan file valid!"
 
-      # ... (Sisa langkah edit video dan upload ke TikTok/YT/FB milik Anda silakan lanjutkan di bawahnya) ...
+      
