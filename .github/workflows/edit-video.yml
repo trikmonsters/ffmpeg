@@ -98,10 +98,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      # Optimasi 3: Hapus apt-get update & install ffmpeg (Pakai FFmpeg bawaan Runner)
+
       - name: Install dependencies
         run: |
           set -e
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
           pip install \
             google-auth \
             google-auth-oauthlib \
