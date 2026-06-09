@@ -1,0 +1,129 @@
+name: Test Download
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      VIDEO_URL: "https://youtube.com/shorts/P3WwWuEa7BQ"
+
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Get direct video URL
+        id: geturl
+        env:
+          VIDEO_URL: ${{ env.VIDEO_URL }}
+        run: |
+          python << 'EOF'
+          import os
+          import requests
+
+          def resolve_redirects(url):
+              current = url
+
+              for _ in range(15):
+                  r = requests.get(
+                      current,
+                      allow_redirects=False,
+                      timeout=30
+                  )
+
+                  if 300 <= r.status_code < 400:
+                      nxt = r.headers.get("Location")
+                      if not nxt:
+                          break
+                      current = nxt
+                  else:
+                      break
+
+              return current
+
+          api_url = "https://highreach.ai/api/tools/twitter-gif-download"
+
+          payload = {
+              "tweet_url": os.environ["VIDEO_URL"]
+          }
+
+          headers = {
+              "accept": "*/*",
+              "Referer": "https://highreach.ai/tools/youtube-video-downloader"
+          }
+
+          r = requests.post(
+              api_url,
+              json=payload,
+              headers=headers,
+              timeout=60
+          )
+
+          r.raise_for_status()
+
+          data = r.json()
+          formats = data.get("formats", [])
+
+          priorities = [
+              "mp4 (1080p60)",
+              "mp4 (720p60)",
+              "mp4 (480p)",
+              "mp4 (360p)"
+          ]
+
+          selected = None
+
+          for quality in priorities:
+              selected = next(
+                  (f for f in formats if f.get("quality") == quality),
+                  None
+              )
+
+              if selected:
+                  print(f"Selected: {quality}")
+                  break
+
+          if not selected:
+              raise Exception("No suitable format found")
+
+          final_url = resolve_redirects(selected["url"])
+
+          print("Direct URL:")
+          print(final_url)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"direct_url={final_url}\n")
+          EOF
+
+      - name: Download source video
+        run: |
+          set -e
+
+          echo "📥 Downloading source video..."
+
+          curl -f -L \
+            --max-time 120 \
+            --retry 3 \
+            --retry-delay 5 \
+            -H "User-Agent: Mozilla/5.0" \
+            -o input_video.mp4 \
+            "${{ steps.geturl.outputs.direct_url }}"
+
+          ffprobe input_video.mp4 > /dev/null 2>&1 || {
+            echo "❌ Invalid video file"
+            exit 1
+          }
+
+          echo "✅ Download successful"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloaded-video
+          path: input_video.mp4
