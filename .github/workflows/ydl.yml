@@ -17,37 +17,39 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download video via Cobalt Alternative Mirror
+      - name: Download video via Public API
         run: |
           set -e
-          echo "📥 Meminta direct link dari Cobalt Mirror..."
+          echo "📥 Meminta konversi video dari Public API..."
           
-          # Kita gunakan mirror 'co.wuk.sh' atau 'cobalt.lol' yang biasanya lebih longgar
-          STREAM_URL=$(curl -s -X POST "https://co.wuk.sh/api/json" \
+          # 1. Mengirim request ke API untuk convert URL YouTube
+          RESPONSE=$(curl -s -X POST "https://taylor.metube.id/api/v1/download" \
             -H "Content-Type: application/json" \
-            -H "Accept: application/json" \
-            -d "{\"url\": \"${{ github.event.inputs.video_url }}\", \"vQuality\": \"1080\"}" \
-            | python3 -c "import sys, json; print(json.load(sys.stdin).get('url', ''))")
+            -d "{\"url\": \"${{ github.event.inputs.video_url }}\"}")
+          
+          echo "🔍 Mengekstrak link unduhan..."
+          # 2. Mengambil direct link video resolusi tertinggi (MP4) menggunakan Python
+          STREAM_URL=$(echo "$RESPONSE" | python3 -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              # Mengambil url video matang dari response API
+              print(data.get('data', {}).get('url', ''))
+          except:
+              print('')
+          ")
 
           if [ -z "$STREAM_URL" ] || [ "$STREAM_URL" = "None" ]; then
-            echo "❌ Mirror 1 gagal, mencoba Mirror 2..."
-            STREAM_URL=$(curl -s -X POST "https://api.cobalt.lol/api/json" \
-              -H "Content-Type: application/json" \
-              -H "Accept: application/json" \
-              -d "{\"url\": \"${{ github.event.inputs.video_url }}\", \"vQuality\": \"1080\"}" \
-              | python3 -c "import sys, json; print(json.load(sys.stdin).get('url', ''))")
-          fi
-
-          if [ -z "$STREAM_URL" ] || [ "$STREAM_URL" = "None" ]; then
-            echo "❌ Semua API Mirror penuh. Disarankan beralih ke Trik 1 (OAuth2)."
+            echo "❌ API sedang overload atau link tidak valid."
+            echo "Respon Server: $RESPONSE"
             exit 1
           fi
 
-          echo "🔗 Direct Link Sukses Didapatkan!"
-          echo "📥 Mengunduh file video..."
+          echo "📥 Mengunduh video asli dari server..."
+          # 3. Download langsung file video aslinya
           curl -f -L \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
             -o input_video.mp4 \
             "$STREAM_URL"
 
-          echo "✅ Download sukses via Cobalt Mirror!"
+          echo "✅ Video berhasil diunduh gratis tanpa API Key!"
