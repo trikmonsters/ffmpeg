@@ -1,4 +1,4 @@
-name: Video Editor + Multi Platform Upload (Max Quality Boost)
+name: Download
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -30,24 +30,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      # ... (Langkah Cache Pip & Install dependencies Anda biarkan tetap seperti biasa) ...
-
-      - name: Prepare workspace
-        run: |
-          set -e
-          mkdir -p media
-          SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
-          echo "SAFE_NAME=${SAFE_NAME}" >> $GITHUB_ENV
-          echo "OUTPUT_FILE=media/${SAFE_NAME}.mp4" >> $GITHUB_ENV
-
-      # ========================================================
-      # DOWNLOADER BARU: MENGGUNAKAN API PUB/SUB REVOLUSIONER
-      # ========================================================
       - name: Download video via Active Public API
         run: |
           set -e
