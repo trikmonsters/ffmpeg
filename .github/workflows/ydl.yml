@@ -6,7 +6,7 @@ on:
       video_url:
         description: 'Masukkan URL YouTube untuk Test'
         required: true
-        default: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        default: 'https://youtube.com/shorts/MpLpB3TAlKo'
 
 jobs:
   test-downloaders:
@@ -25,7 +25,7 @@ jobs:
       # ==========================================
       # METODE 1: YT-DLP DENGAN MOBILE CLIENT BYPASS
       # ==========================================
-       Civ-name: Test Metode 1 - yt-dlp Mobile Client
+      - name: Test Metode 1 - yt-dlp Mobile Client
         continue-on-error: true # Agar jika metode 1 gagal, workflow tetap lanjut menguji metode berikutnya
         run: |
           echo "=== PENGUJIAN METODE 1: YT-DLP MOBILE CLIENT ==="
