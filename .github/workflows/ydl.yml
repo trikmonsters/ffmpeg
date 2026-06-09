@@ -17,39 +17,41 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download video via Public API
+      - name: Download video via SaveFrom API
         run: |
           set -e
-          echo "📥 Meminta konversi video dari Public API..."
+          echo "📥 Menghubungi SaveFrom API Server..."
           
-          # 1. Mengirim request ke API untuk convert URL YouTube
-          RESPONSE=$(curl -s -X POST "https://taylor.metube.id/api/v1/download" \
+          # 1. Request data video ke API gateway
+          RESPONSE=$(curl -s -X POST "https://worker.sf-api.com/savefrom" \
             -H "Content-Type: application/json" \
             -d "{\"url\": \"${{ github.event.inputs.video_url }}\"}")
           
-          echo "🔍 Mengekstrak link unduhan..."
-          # 2. Mengambil direct link video resolusi tertinggi (MP4) menggunakan Python
+          echo "🔍 Memilih kualitas video terbaik..."
+          # 2. Mengkstrak url MP4 kualitas terbaik menggunakan skrip Python otomatis
           STREAM_URL=$(echo "$RESPONSE" | python3 -c "
           import sys, json
           try:
               data = json.load(sys.stdin)
-              # Mengambil url video matang dari response API
-              print(data.get('data', {}).get('url', ''))
+              # Mencari link download di dalam array 'url' pertama yang tipenya video/mp4
+              urls = data.get('url', [])
+              mp4_links = [u.get('url') for u in urls if 'mp4' in u.get('ext', '') or 'video' in u.get('type', '')]
+              print(mp4_links[0] if mp4_links else '')
           except:
               print('')
           ")
 
           if [ -z "$STREAM_URL" ] || [ "$STREAM_URL" = "None" ]; then
-            echo "❌ API sedang overload atau link tidak valid."
+            echo "❌ Gagal mendapatkan link dari SaveFrom API."
             echo "Respon Server: $RESPONSE"
             exit 1
           fi
 
-          echo "📥 Mengunduh video asli dari server..."
-          # 3. Download langsung file video aslinya
+          echo "📥 Memulai pengunduhan file video..."
+          # 3. Proses download akhir file MP4
           curl -f -L \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
             -o input_video.mp4 \
             "$STREAM_URL"
 
-          echo "✅ Video berhasil diunduh gratis tanpa API Key!"
+          echo "✅ Download sukses 100% Free!"
