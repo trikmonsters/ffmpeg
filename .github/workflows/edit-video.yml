@@ -78,7 +78,6 @@ jobs:
       contents: write
 
     steps:
-      # Optimasi 1: Shallow Clone (Hanya ambil commit terakhir)
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -89,7 +88,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      # Optimasi 2: Cache Pip Packages agar tidak download ulang library python
       - name: Cache Pip Packages
         uses: actions/cache@v4
         with:
@@ -97,7 +95,6 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
-
 
       - name: Install dependencies
         run: |
@@ -112,7 +109,17 @@ jobs:
             requests \
             Pillow
           ffmpeg -version | head -1
-          echo "✅ Dependencies installed instantly"
+          echo "✅ Dependencies installed"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm install playwright
+          npx playwright install chromium --with-deps
 
       - name: Prepare workspace
         run: |
@@ -120,43 +127,116 @@ jobs:
           mkdir -p media
           SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
           echo "SAFE_NAME=${SAFE_NAME}" >> $GITHUB_ENV
-          echo "OUTPUT_FILE=media/${SAFE_NAME}.mp4" >> $GITHUB_ENV
+          echo "FINAL_OUTPUT=media/${SAFE_NAME}.mp4" >> $GITHUB_ENV
           echo "✅ SAFE_NAME: ${SAFE_NAME}"
 
+      # ─── DOWNLOAD VIDEO (Playwright) ───────────────────────────────────────────
       - name: Download video
         run: |
+          cat > script.mjs <<'EOF'
+          import fs from "fs";
+          import { chromium } from "playwright";
+
+          const MAX_RETRIES = 3;
+          let lastError;
+
+          const browser = await chromium.launch({
+            headless: true,
+            args: ["--no-sandbox"]
+          });
+
+          for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            console.log(`\n=== Attempt ${attempt}/${MAX_RETRIES} ===`);
+            const context = await browser.newContext({ acceptDownloads: true });
+            const page = await context.newPage();
+            try {
+              console.log("Loading page...");
+              await page.goto("https://ytshortsdl.io/", {
+                timeout: 30000,
+                waitUntil: "domcontentloaded"
+              });
+
+              console.log("Filling URL input...");
+              const input = page.locator("input").first();
+              await input.waitFor({ state: "visible", timeout: 15000 });
+              await input.fill(process.env.SHORT_URL);
+              await input.press("Enter");
+
+              console.log("Waiting for download button...");
+              await page.waitForSelector("button.download", {
+                state: "visible",
+                timeout: 60000
+              });
+              const btn = page.locator("button.download");
+
+              try {
+                const popupPromise = page.waitForEvent("popup", { timeout: 10000 });
+                await btn.click({ force: true });
+                const popup = await popupPromise;
+                await popup.close();
+                console.log("Popup dismissed.");
+              } catch {
+                console.log("No popup detected.");
+              }
+
+              await page.waitForTimeout(2000);
+
+              console.log("Starting download...");
+              const downloadPromise = page.waitForEvent("download", { timeout: 60000 });
+              await btn.click({ force: true });
+              const download = await downloadPromise;
+
+              // Simpan langsung sebagai input_video.mp4 agar langsung dipakai ffmpeg
+              await download.saveAs("input_video.mp4");
+              console.log("✅ Download success: input_video.mp4");
+
+              await context.close();
+              await browser.close();
+              process.exit(0);
+            } catch (err) {
+              lastError = err;
+              console.error(`Attempt ${attempt} failed: ${err.message}`);
+              await context.close();
+              if (attempt < MAX_RETRIES) {
+                const waitSec = attempt * 10;
+                console.log(`Waiting ${waitSec}s before retry...`);
+                await new Promise(r => setTimeout(r, waitSec * 1000));
+              }
+            }
+          }
+
+          await browser.close();
+          console.error(`All ${MAX_RETRIES} attempts failed.`);
+          console.error(lastError);
+          process.exit(1);
+          EOF
+          node script.mjs
+        env:
+          SHORT_URL: ${{ github.event.inputs.video_url }}
+
+      - name: Validate downloaded video
+        run: |
           set -e
-          echo "📥 Downloading source video..."
-          curl -L \
-            --max-time 180 \
-            --retry 3 \
-            --retry-delay 5 \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-            -H "Accept: video/mp4,video/*;q=0.9,*/*;q=0.8" \
-            -H "Accept-Language: en-US,en;q=0.5" \
-            --compressed \
-            -o input_video.mp4 \
-            "${{ github.event.inputs.video_url }}"
- 
           echo "📊 File size: $(du -sh input_video.mp4 | cut -f1)"
- 
-          # Cek apakah file adalah HTML (redirect ke error page)
+
           MIME=$(file --mime-type -b input_video.mp4)
           echo "📄 MIME type detected: $MIME"
           if echo "$MIME" | grep -qE "html|text|xml"; then
-            echo "❌ Server returned HTML instead of video (URL expired or blocked)"
+            echo "❌ Downloaded file is not a video (got HTML/text)"
             head -c 500 input_video.mp4
             exit 1
           fi
- 
-          # Validasi dengan ffprobe
-          ffprobe -v error -select_streams v:0 -show_entries stream=codec_type -of csv=p=0 input_video.mp4 2>&1 | grep -q "video" || {
+
+          ffprobe -v error -select_streams v:0 \
+            -show_entries stream=codec_type \
+            -of csv=p=0 input_video.mp4 2>&1 | grep -q "video" || {
             echo "❌ ffprobe cannot detect video stream"
             ffprobe -v error input_video.mp4 2>&1 | tail -5
             exit 1
           }
- 
-          echo "✅ Download successful"
+
+          echo "✅ Video validation passed"
+      # ───────────────────────────────────────────────────────────────────────────
 
       - name: Download logo
         if: ${{ github.event.inputs.logo_image_url != '' }}
@@ -175,7 +255,6 @@ jobs:
             --width "${{ github.event.inputs.logo_width }}" \
             --opacity "${{ github.event.inputs.logo_opacity }}"
 
-      # KODE RENDERING DIKEMBALIKAN KE KUALITAS MAKSIMAL PILIHANMU (H.265 / Lanczos / Medium)
       - name: Edit video
         run: |
           set -e
@@ -195,7 +274,7 @@ jobs:
               top-center)    OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
               top-right)     OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="$MARGIN" ;;
               bottom-left)   OVERLAY_X="$MARGIN";       OVERLAY_Y="H-h-$MARGIN" ;;
-              bottom-center) OVERLAY_X="(W-w)/2";      OVERLAY_Y="H-h-$MARGIN" ;;
+              bottom-center) OVERLAY_X="(W-w)/2";       OVERLAY_Y="H-h-$MARGIN" ;;
               bottom-right)  OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="H-h-$MARGIN" ;;
               *)             OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
             esac
@@ -225,7 +304,7 @@ jobs:
               -c:a aac \
               -b:a 192k \
               -ar 48000 \
-              "${{ env.OUTPUT_FILE }}"
+              "${{ env.FINAL_OUTPUT }}"
 
           else
 
@@ -248,7 +327,7 @@ jobs:
               -c:a aac \
               -b:a 192k \
               -ar 48000 \
-              "${{ env.OUTPUT_FILE }}"
+              "${{ env.FINAL_OUTPUT }}"
 
           fi
 
@@ -261,7 +340,7 @@ jobs:
         run: |
           set -e
           python3 scripts/upload_youtube.py \
-            --file "${{ env.OUTPUT_FILE }}" \
+            --file "${{ env.FINAL_OUTPUT }}" \
             --title "${{ github.event.inputs.post_title }}" \
             --description "${{ github.event.inputs.post_description }}" \
             --tags "${{ github.event.inputs.post_tags }}"
@@ -271,7 +350,7 @@ jobs:
         run: |
           set -e
           python3 scripts/upload_facebook.py \
-            --file "${{ env.OUTPUT_FILE }}" \
+            --file "${{ env.FINAL_OUTPUT }}" \
             --page-id "${{ github.event.inputs.fb_page_id }}" \
             --access-token "${{ github.event.inputs.fb_access_token }}" \
             --title "${{ github.event.inputs.post_title }}" \
@@ -309,8 +388,8 @@ jobs:
             --repo "${{ github.repository }}" \
             --title "TikTok Video (temporary hosting)" \
             --notes "Temporary hosting for Buffer API. Automatically replaced on next run." \
-            "${{ env.OUTPUT_FILE }}"
-          echo "✅ Release created successfully" 
+            "${{ env.FINAL_OUTPUT }}"
+          echo "✅ Release created successfully"
 
       - name: Get video URL from release
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
@@ -345,19 +424,19 @@ jobs:
           import urllib.request
           import urllib.error
           from datetime import datetime, timezone, timedelta
-          
+
           api_key = os.environ["BUFFER_API_KEY"]
           channel_id = os.environ["BUFFER_CHANNEL_ID"]
           video_url = os.environ["VIDEO_URL"]
           caption = os.environ.get("TIKTOK_CAPTION", "")
-          
+
           due_at = (
               datetime.now(timezone.utc) + timedelta(minutes=1)
           ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-          
+
           print(f"📅 Scheduled time : {due_at}")
           print(f"🎬 Video URL      : {video_url}")
-          
+
           mutation = (
               "mutation { createPost(input: {"
               "  text: " + json.dumps(caption) +
@@ -371,9 +450,9 @@ jobs:
               "  ... on MutationError { message }"
               "} }"
           )
-          
+
           payload = json.dumps({"query": mutation}).encode("utf-8")
-          
+
           req = urllib.request.Request(
               "https://api.buffer.com/graphql",
               data=payload,
@@ -382,14 +461,14 @@ jobs:
                   "Authorization": "Bearer " + api_key,
               }
           )
-          
+
           try:
               with urllib.request.urlopen(req) as res:
                   body = json.loads(res.read().decode("utf-8"))
           except urllib.error.HTTPError as e:
               print(f"HTTP Error {e.code}: {e.read().decode()}")
               sys.exit(1)
-          
+
           print(json.dumps(body, indent=2))
           PYEOF
 
