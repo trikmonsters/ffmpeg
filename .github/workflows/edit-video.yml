@@ -297,7 +297,7 @@ jobs:
             -c:v libx265 \
             -tag:v hvc1 \
             -r 30 \
-            -preset slow \
+            -preset medium \
             -crf 19 \
             -profile:v main \
             -level 5.1 \
