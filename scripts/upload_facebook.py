@@ -67,22 +67,18 @@ def upload_video_binary(upload_url: str, file_path: str, access_token: str) -> b
     return True
 
 
-def publish_reel(page_id: str, access_token: str, video_id: str, title: str, description: str, tags: str) -> dict:
+def publish_reel(page_id: str, access_token: str, video_id: str, title: str, description: str) -> dict:
     """Step 3: Publish video sebagai Reel."""
     print("📢 Publishing sebagai Facebook Reel...")
 
-    # Gabungkan hashtags dari tags
-    tag_list    = [t.strip() for t in tags.split(",") if t.strip()]
-    hashtags    = " ".join([f"#{t}" if not t.startswith("#") else t for t in tag_list])
-    full_desc   = f"{description}\n\n{hashtags}" if hashtags else description
-
+    
     url = f"{GRAPH_BASE}/{page_id}/video_reels"
     payload = {
         "video_id":     video_id,
         "upload_phase": "finish",
         "access_token": access_token,
         "video_state":  "PUBLISHED",
-        "description":  full_desc[:2200],  # max 2200 karakter Facebook
+        "description":  description,
         "title":        title[:255],
     }
 
@@ -108,7 +104,6 @@ def main():
     parser.add_argument("--access-token", required=True,  help="Facebook Page Access Token")
     parser.add_argument("--title",        required=True,  help="Judul video")
     parser.add_argument("--description",  default="",     help="Deskripsi video")
-    parser.add_argument("--tags",         default="",     help="Tags pisah koma")
     args = parser.parse_args()
 
     if not os.path.exists(args.file):
@@ -138,7 +133,7 @@ def main():
         session["video_id"],
         args.title,
         args.description,
-        args.tags,
+        
     )
 
     # Simpan/append hasil ke upload_results.json
