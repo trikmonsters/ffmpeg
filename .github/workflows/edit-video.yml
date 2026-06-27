@@ -354,8 +354,7 @@ jobs:
             --page-id "${{ github.event.inputs.fb_page_id }}" \
             --access-token "${{ github.event.inputs.fb_access_token }}" \
             --title "${{ github.event.inputs.post_title }}" \
-            --description "${{ github.event.inputs.post_description }}" \
-            --tags "${{ github.event.inputs.post_tags }}"
+            --description "${{ github.event.inputs.post_description }}" 
 
       - name: Delete old release
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
