@@ -337,24 +337,32 @@ jobs:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          INPUT_TITLE: ${{ github.event.inputs.post_title }}
+          INPUT_DESC: ${{ github.event.inputs.post_description }}
+          INPUT_TAGS: ${{ github.event.inputs.post_tags }}
         run: |
           set -e
           python3 scripts/upload_youtube.py \
-            --file "${{ env.FINAL_OUTPUT }}" \
-            --title "${{ github.event.inputs.post_title }}" \
-            --description "${{ github.event.inputs.post_description }}" \
-            --tags "${{ github.event.inputs.post_tags }}"
+            --file "${FINAL_OUTPUT}" \
+            --title "${INPUT_TITLE}" \
+            --description "${INPUT_DESC}" \
+            --tags "${INPUT_TAGS}"
 
       - name: Upload Facebook Reels
         if: ${{ github.event.inputs.upload_facebook == 'true' }}
+        env:
+          INPUT_TITLE: ${{ github.event.inputs.post_title }}
+          INPUT_DESC: ${{ github.event.inputs.post_description }}
+          FB_PAGE_ID: ${{ github.event.inputs.fb_page_id }}
+          FB_TOKEN: ${{ github.event.inputs.fb_access_token }}
         run: |
           set -e
           python3 scripts/upload_facebook.py \
-            --file "${{ env.FINAL_OUTPUT }}" \
-            --page-id "${{ github.event.inputs.fb_page_id }}" \
-            --access-token "${{ github.event.inputs.fb_access_token }}" \
-            --title "${{ github.event.inputs.post_title }}" \
-            --description "${{ github.event.inputs.post_description }}" 
+            --file "${FINAL_OUTPUT}" \
+            --page-id "${FB_PAGE_ID}" \
+            --access-token "${FB_TOKEN}" \
+            --title "${INPUT_TITLE}" \
+            --description "${INPUT_DESC}" 
 
       - name: Delete old release
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
@@ -387,7 +395,7 @@ jobs:
             --repo "${{ github.repository }}" \
             --title "TikTok Video (temporary hosting)" \
             --notes "Temporary hosting for Buffer API. Automatically replaced on next run." \
-            "${{ env.FINAL_OUTPUT }}"
+            "${FINAL_OUTPUT}"
           echo "✅ Release created successfully"
 
       - name: Get video URL from release
