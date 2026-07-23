@@ -73,7 +73,7 @@ on:
 jobs:
   edit-and-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 120
     permissions:
       contents: write
 
@@ -99,6 +99,8 @@ jobs:
       - name: Install Dependencies
         run: |
           set -e
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
           pip install \
             google-auth \
             google-auth-oauthlib \
@@ -106,12 +108,8 @@ jobs:
             google-api-python-client \
             requests \
             Pillow
-
-      - name: Install FFmpeg Binary
-        run: |
-          mkdir -p ~/.local/bin
-          curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | tar -xJ --strip-components=1 -C ~/.local/bin
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          ffmpeg -version | head -1
+          echo "✅ Dependencies installed"
 
       - name: Install yt-dlp Binary
         run: |
