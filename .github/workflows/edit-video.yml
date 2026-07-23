@@ -96,11 +96,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           set -e
-          sudo apt-get update -y
-          sudo apt-get install -y ffmpeg
           pip install \
             google-auth \
             google-auth-oauthlib \
@@ -108,144 +106,53 @@ jobs:
             google-api-python-client \
             requests \
             Pillow
-          ffmpeg -version | head -1
-          echo "✅ Dependencies installed"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Playwright
+      - name: Install FFmpeg Binary
         run: |
-          npm install playwright
-          npx playwright install chromium --with-deps
+          mkdir -p ~/.local/bin
+          curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | tar -xJ --strip-components=1 -C ~/.local/bin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Prepare workspace
+      - name: Install yt-dlp Binary
+        run: |
+          mkdir -p ~/.local/bin
+          curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ~/.local/bin/yt-dlp
+          chmod +x ~/.local/bin/yt-dlp
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Prepare Workspace & Output Path
         run: |
           set -e
-          mkdir -p media
+          mkdir -p media downloads
           SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
           echo "SAFE_NAME=${SAFE_NAME}" >> $GITHUB_ENV
           echo "FINAL_OUTPUT=media/${SAFE_NAME}.mp4" >> $GITHUB_ENV
           echo "✅ SAFE_NAME: ${SAFE_NAME}"
 
-      # ─── DOWNLOAD VIDEO (Playwright) ───────────────────────────────────────────
-      - name: Download video
-        run: |
-          cat > script.mjs <<'EOF'
-          import fs from "fs";
-          import { chromium } from "playwright";
-
-          const MAX_RETRIES = 3;
-          let lastError;
-
-          const browser = await chromium.launch({
-            headless: true,
-            args: ["--no-sandbox"]
-          });
-
-          for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            console.log(`\n=== Attempt ${attempt}/${MAX_RETRIES} ===`);
-            const context = await browser.newContext({ acceptDownloads: true });
-            const page = await context.newPage();
-            try {
-              console.log("Loading page...");
-              await page.goto("https://ytshortsdl.io/", {
-                timeout: 30000,
-                waitUntil: "domcontentloaded"
-              });
-
-              console.log("Filling URL input...");
-              const input = page.locator("input").first();
-              await input.waitFor({ state: "visible", timeout: 15000 });
-              await input.fill(process.env.SHORT_URL);
-              await input.press("Enter");
-
-              console.log("Waiting for download button...");
-              await page.waitForSelector("button.download", {
-                state: "visible",
-                timeout: 60000
-              });
-              const btn = page.locator("button.download");
-
-              try {
-                const popupPromise = page.waitForEvent("popup", { timeout: 10000 });
-                await btn.click({ force: true });
-                const popup = await popupPromise;
-                await popup.close();
-                console.log("Popup dismissed.");
-              } catch {
-                console.log("No popup detected.");
-              }
-
-              await page.waitForTimeout(2000);
-
-              console.log("Starting download...");
-              const downloadPromise = page.waitForEvent("download", { timeout: 60000 });
-              await btn.click({ force: true });
-              const download = await downloadPromise;
-
-              // Simpan langsung sebagai input_video.mp4 agar langsung dipakai ffmpeg
-              await download.saveAs("input_video.mp4");
-              console.log("✅ Download success: input_video.mp4");
-
-              await context.close();
-              await browser.close();
-              process.exit(0);
-            } catch (err) {
-              lastError = err;
-              console.error(`Attempt ${attempt} failed: ${err.message}`);
-              await context.close();
-              if (attempt < MAX_RETRIES) {
-                const waitSec = attempt * 10;
-                console.log(`Waiting ${waitSec}s before retry...`);
-                await new Promise(r => setTimeout(r, waitSec * 1000));
-              }
-            }
-          }
-
-          await browser.close();
-          console.error(`All ${MAX_RETRIES} attempts failed.`);
-          console.error(lastError);
-          process.exit(1);
-          EOF
-          node script.mjs
+      - name: Create Cookie File
         env:
-          SHORT_URL: ${{ github.event.inputs.video_url }}
+          COOKIES_TEXT: ${{ secrets.COOKIE }}
+        run: |
+          echo "$COOKIES_TEXT" > ./cookies.txt
 
-      - name: Validate downloaded video
+      - name: Download Video via yt-dlp
         run: |
           set -e
-          echo "📊 File size: $(du -sh input_video.mp4 | cut -f1)"
+          yt-dlp --cookies ./cookies.txt \
+                 --remote-components ejs:github \
+                 -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" \
+                 --merge-output-format mp4 \
+                 -o "downloads/input_video.mp4" \
+                 "${{ github.event.inputs.video_url }}"
 
-          MIME=$(file --mime-type -b input_video.mp4)
-          echo "📄 MIME type detected: $MIME"
-          if echo "$MIME" | grep -qE "html|text|xml"; then
-            echo "❌ Downloaded file is not a video (got HTML/text)"
-            head -c 500 input_video.mp4
-            exit 1
-          fi
-
-          ffprobe -v error -select_streams v:0 \
-            -show_entries stream=codec_type \
-            -of csv=p=0 input_video.mp4 2>&1 | grep -q "video" || {
-            echo "❌ ffprobe cannot detect video stream"
-            ffprobe -v error input_video.mp4 2>&1 | tail -5
-            exit 1
-          }
-
-          echo "✅ Video validation passed"
-      # ───────────────────────────────────────────────────────────────────────────
-
-      - name: Download logo
+      - name: Download Logo Image
         if: ${{ github.event.inputs.logo_image_url != '' }}
         run: |
           set -e
           curl -f -L -o logo_original.png "${{ github.event.inputs.logo_image_url }}"
           echo "✅ Logo downloaded successfully"
 
-      - name: Prepare logo
+      - name: Prepare Logo Image
         if: ${{ github.event.inputs.logo_image_url != '' }}
         run: |
           set -e
@@ -255,32 +162,30 @@ jobs:
             --width "${{ github.event.inputs.logo_width }}" \
             --opacity "${{ github.event.inputs.logo_opacity }}"
 
-      - name: Edit video
+      - name: Render Video with FFmpeg
         run: |
           set -e
 
           POSISI="${{ github.event.inputs.logo_position }}"
           MARGIN="${{ github.event.inputs.logo_margin }}"
-
           LOGO_EXISTS=false
           [ -f "logo_ready.png" ] && LOGO_EXISTS=true
 
           echo "🎬 Processing video in Max Quality Mode..."
 
           if [ "$LOGO_EXISTS" = "true" ]; then
-
             case "$POSISI" in
-              top-left)      OVERLAY_X="$MARGIN";       OVERLAY_Y="$MARGIN" ;;
-              top-center)    OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
-              top-right)     OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="$MARGIN" ;;
-              bottom-left)   OVERLAY_X="$MARGIN";       OVERLAY_Y="H-h-$MARGIN" ;;
-              bottom-center) OVERLAY_X="(W-w)/2";       OVERLAY_Y="H-h-$MARGIN" ;;
-              bottom-right)  OVERLAY_X="W-w-$MARGIN";   OVERLAY_Y="H-h-$MARGIN" ;;
-              *)             OVERLAY_X="(W-w)/2";       OVERLAY_Y="$MARGIN" ;;
+              top-left)      OVERLAY_X="$MARGIN";        OVERLAY_Y="$MARGIN" ;;
+              top-center)    OVERLAY_X="(W-w)/2";        OVERLAY_Y="$MARGIN" ;;
+              top-right)     OVERLAY_X="W-w-$MARGIN";    OVERLAY_Y="$MARGIN" ;;
+              bottom-left)   OVERLAY_X="$MARGIN";        OVERLAY_Y="H-h-$MARGIN" ;;
+              bottom-center) OVERLAY_X="(W-w)/2";        OVERLAY_Y="H-h-$MARGIN" ;;
+              bottom-right)  OVERLAY_X="W-w-$MARGIN";    OVERLAY_Y="H-h-$MARGIN" ;;
+              *)             OVERLAY_X="(W-w)/2";        OVERLAY_Y="$MARGIN" ;;
             esac
 
             ffmpeg -y \
-              -i input_video.mp4 \
+              -i downloads/input_video.mp4 \
               -i logo_ready.png \
               -i media/transisi/GJ.mp4 \
               -filter_complex \
@@ -290,26 +195,14 @@ jobs:
               [2:v]scale=1440:2560:flags=lanczos,setsar=1,format=yuv420p,setpts=PTS-STARTPTS[tv];\
               [2:a]asetpts=PTS-STARTPTS[ta];\
               [mainv][maina][tv][ta]concat=n=2:v=1:a=1[vout][aout]" \
-              -map "[vout]" \
-              -map "[aout]" \
-              -c:v libx265 \
-              -tag:v hvc1 \
-              -r 30 \
-              -preset slow \
-              -crf 19 \
-              -profile:v main \
-              -level 5.1 \
-              -pix_fmt yuv420p \
-              -movflags +faststart \
-              -c:a aac \
-              -b:a 192k \
-              -ar 48000 \
+              -map "[vout]" -map "[aout]" \
+              -c:v libx265 -tag:v hvc1 -r 30 -preset slow -crf 19 -profile:v main -level 5.1 \
+              -pix_fmt yuv420p -movflags +faststart \
+              -c:a aac -b:a 192k -ar 48000 \
               "${{ env.FINAL_OUTPUT }}"
-
           else
-
             ffmpeg -y \
-              -i input_video.mp4 \
+              -i downloads/input_video.mp4 \
               -i media/transisi/GJ.mp4 \
               -filter_complex \
               "[0:v]scale=1440:2560:flags=lanczos,setsar=1,setpts=PTS/1.1,eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95,format=yuv420p[mainv];\
@@ -317,21 +210,14 @@ jobs:
               [1:v]scale=1440:2560:flags=lanczos,setsar=1,format=yuv420p,setpts=PTS-STARTPTS[tv];\
               [1:a]asetpts=PTS-STARTPTS[ta];\
               [mainv][maina][tv][ta]concat=n=2:v=1:a=1[vout][aout]" \
-              -map "[vout]" \
-              -map "[aout]" \
-              -c:v libx264 \
-              -preset fast \
-              -crf 22 \
-              -pix_fmt yuv420p \
-              -movflags +faststart \
-              -c:a aac \
-              -b:a 192k \
-              -ar 48000 \
+              -map "[vout]" -map "[aout]" \
+              -c:v libx264 -preset fast -crf 22 \
+              -pix_fmt yuv420p -movflags +faststart \
+              -c:a aac -b:a 192k -ar 48000 \
               "${{ env.FINAL_OUTPUT }}"
-
           fi
 
-      - name: Upload YouTube
+      - name: Upload to YouTube
         if: ${{ github.event.inputs.upload_youtube == 'true' }}
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
@@ -348,7 +234,7 @@ jobs:
             --description "${INPUT_DESC}" \
             --tags "${INPUT_TAGS}"
 
-      - name: Upload Facebook Reels
+      - name: Upload to Facebook Reels
         if: ${{ github.event.inputs.upload_facebook == 'true' }}
         env:
           INPUT_TITLE: ${{ github.event.inputs.post_title }}
@@ -362,57 +248,46 @@ jobs:
             --page-id "${FB_PAGE_ID}" \
             --access-token "${FB_TOKEN}" \
             --title "${INPUT_TITLE}" \
-            --description "${INPUT_DESC}" 
+            --description "${INPUT_DESC}"
 
-      - name: Delete old release
+      - name: Delete Old GitHub Release
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          echo "🗑️ Checking for old releases..."
-          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases \
-            --jq '.[] | select(.tag_name == "tiktok_video") | .id' 2>/dev/null || echo "")
+          echo "🗑️ Checking for old temporary releases..."
+          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases --jq '.[] | select(.tag_name == "tiktok_video") | .id' 2>/dev/null || echo "")
           if [ -n "$RELEASE_ID" ]; then
-            echo "Deleting release ID: $RELEASE_ID"
             gh api -X DELETE repos/${{ github.repository }}/releases/$RELEASE_ID
             sleep 2
             gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/tiktok_video || true
-            sleep 2
             echo "✅ Old release deleted"
           else
             echo "ℹ️ No old release found"
           fi
 
-      - name: Upload video to GitHub Release
+      - name: Create Temporary Release for TikTok Host
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          echo "📦 Creating GitHub release..."
+          echo "📦 Hosting video temporarily via GitHub release..."
           gh release create tiktok_video \
             --repo "${{ github.repository }}" \
-            --title "TikTok Video (temporary hosting)" \
-            --notes "Temporary hosting for Buffer API. Automatically replaced on next run." \
+            --title "TikTok Video Temporary Host" \
+            --notes "Temporary public URL for Buffer API." \
             "${FINAL_OUTPUT}"
-          echo "✅ Release created successfully"
-
-      - name: Get video URL from release
-        if: ${{ github.event.inputs.upload_tiktok == 'true' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
+          
           sleep 5
-          VIDEO_URL=$(gh api repos/${{ github.repository }}/releases/tags/tiktok_video \
-            --jq '.assets[0].browser_download_url')
+          VIDEO_URL=$(gh api repos/${{ github.repository }}/releases/tags/tiktok_video --jq '.assets[0].browser_download_url')
           if [ -z "$VIDEO_URL" ] || [ "$VIDEO_URL" = "null" ]; then
-            echo "❌ Failed to get video URL from release"
+            echo "❌ Failed to fetch public video URL"
             exit 1
           fi
           echo "VIDEO_URL=${VIDEO_URL}" >> $GITHUB_ENV
-          echo "✅ Video URL: ${VIDEO_URL}"
+          echo "✅ Public Video URL: ${VIDEO_URL}"
 
       - name: Upload TikTok via Buffer API
         if: ${{ github.event.inputs.upload_tiktok == 'true' }}
@@ -423,7 +298,7 @@ jobs:
           VIDEO_URL: ${{ env.VIDEO_URL }}
         run: |
           set -e
-          echo "📤 Sending to Buffer API..."
+          echo "📤 Sending post payload to Buffer API..."
           python3 - <<'PYEOF'
           import os
           import json
@@ -437,48 +312,53 @@ jobs:
           video_url = os.environ["VIDEO_URL"]
           caption = os.environ.get("TIKTOK_CAPTION", "")
 
-          due_at = (
-              datetime.now(timezone.utc) + timedelta(minutes=1)
-          ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+          due_at = (datetime.now(timezone.utc) + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
           print(f"📅 Scheduled time : {due_at}")
           print(f"🎬 Video URL      : {video_url}")
 
-          mutation = (
-              "mutation { createPost(input: {"
-              "  text: " + json.dumps(caption) +
-              "  channelId: " + json.dumps(channel_id) +
-              "  schedulingType: automatic"
-              "  mode: customScheduled"
-              "  dueAt: " + json.dumps(due_at) +
-              "  assets: [{ video: { url: " + json.dumps(video_url) + " } }]"
-              "}) {"
-              "  ... on PostActionSuccess { post { id dueAt } }"
-              "  ... on MutationError { message }"
-              "} }"
-          )
+          mutation = """
+          mutation CreatePost($text: String!, $channelId: String!, $dueAt: String!, $videoUrl: String!) {
+            createPost(input: {
+              text: $text
+              channelId: $channelId
+              schedulingType: automatic
+              mode: customScheduled
+              dueAt: $dueAt
+              assets: [{ video: { url: $videoUrl } }]
+            }) {
+              ... on PostActionSuccess { post { id dueAt } }
+              ... on MutationError { message }
+            }
+          }
+          """
 
-          payload = json.dumps({"query": mutation}).encode("utf-8")
+          variables = {
+              "text": caption,
+              "channelId": channel_id,
+              "dueAt": due_at,
+              "videoUrl": video_url
+          }
+
+          payload = json.dumps({"query": mutation, "variables": variables}).encode("utf-8")
 
           req = urllib.request.Request(
               "https://api.buffer.com/graphql",
               data=payload,
               headers={
                   "Content-Type": "application/json",
-                  "Authorization": "Bearer " + api_key,
+                  "Authorization": f"Bearer {api_key}",
               }
           )
 
           try:
               with urllib.request.urlopen(req) as res:
                   body = json.loads(res.read().decode("utf-8"))
+                  print(json.dumps(body, indent=2))
           except urllib.error.HTTPError as e:
               print(f"HTTP Error {e.code}: {e.read().decode()}")
               sys.exit(1)
-
-          print(json.dumps(body, indent=2))
           PYEOF
 
-      - name: Done
-        run: |
-          echo "🎉 All tasks completed"
+      - name: Task Completion
+        run: echo "🎉 All editing and publishing processes finished!"
