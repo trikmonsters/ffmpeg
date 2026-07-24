@@ -1,0 +1,468 @@
+name: Video Editor + Multi Platform Upload (Max Quality Boost)
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'Source video URL'
+        required: true
+      output_filename:
+        description: 'Output filename (without .mp4)'
+        required: true
+        default: 'video-001'
+      logo_image_url:
+        description: 'Logo image URL'
+        required: false
+        default: ''
+      logo_width:
+        description: 'Logo width'
+        required: false
+        default: '200'
+      logo_position:
+        description: 'Logo position (top-left, top-center, top-right, bottom-left, bottom-center, bottom-right)'
+        required: false
+        default: 'top-center'
+      logo_opacity:
+        description: 'Logo opacity'
+        required: false
+        default: '0.9'
+      logo_margin:
+        description: 'Logo margin'
+        required: false
+        default: '20'
+      post_title:
+        description: 'Post title'
+        required: true
+        default: 'My Short Video'
+      post_description:
+        description: 'Post description'
+        required: false
+        default: 'Check this out!'
+      post_tags:
+        description: 'Tags'
+        required: false
+        default: 'shorts,viral,fyp'
+      tiktok_description:
+        description: 'TikTok caption'
+        required: false
+        default: 'Cool video! #fyp #viral'
+      upload_youtube:
+        description: 'Upload to YouTube'
+        required: false
+        default: 'true'
+      upload_facebook:
+        description: 'Upload to Facebook'
+        required: false
+        default: 'true'
+      upload_tiktok:
+        description: 'Upload to TikTok'
+        required: false
+        default: 'true'
+      fb_access_token:
+        description: 'Facebook Access Token'
+        required: false
+        default: ''
+      fb_page_id:
+        description: 'Facebook Page ID'
+        required: false
+        default: ''
+
+jobs:
+  # ==========================================
+  # JOB 1: DOWNLOAD VIDEO
+  # ==========================================
+  download-video:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg Binary
+        run: |
+          mkdir -p ~/.local/bin
+          curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | tar -xJ --strip-components=1 -C ~/.local/bin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install yt-dlp Binary
+        run: |
+          mkdir -p ~/.local/bin
+          curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ~/.local/bin/yt-dlp
+          chmod +x ~/.local/bin/yt-dlp
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Create Downloads Cookie File
+        env:
+          COOKIES_TEXT: ${{ secrets.COOKIE }}
+        run: |
+          mkdir -p downloads
+          echo "$COOKIES_TEXT" > ./cookies.txt
+
+      - name: Download Video via yt-dlp
+        run: |
+          set -e
+          yt-dlp --cookies ./cookies.txt \
+                 --remote-components ejs:github \
+                 -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" \
+                 --merge-output-format mp4 \
+                 -o "downloads/input_video.mp4" \
+                 "${{ github.event.inputs.video_url }}"
+
+      - name: Upload Raw Video Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-downloaded-video
+          path: downloads/input_video.mp4
+          retention-days: 1
+
+  # ==========================================
+  # JOB 2: EDIT & RENDER WITH FFMPEG
+  # ==========================================
+  render-video:
+    needs: download-video
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      safe_name: ${{ steps.workspace.outputs.safe_name }}
+      final_output: ${{ steps.workspace.outputs.final_output }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg & Python Dependencies
+        run: |
+          set -e
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+          pip install Pillow requests
+          echo "✅ Dependencies installed"
+
+      - name: Download Raw Video Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: raw-downloaded-video
+          path: downloads
+
+      - name: Prepare Workspace & Output Path
+        id: workspace
+        run: |
+          set -e
+          mkdir -p media
+          SAFE_NAME=$(echo "${{ github.event.inputs.output_filename }}" | tr -cd '[:alnum:]_-')
+          FINAL_PATH="media/${SAFE_NAME}.mp4"
+          
+          echo "safe_name=${SAFE_NAME}" >> $GITHUB_OUTPUT
+          echo "final_output=${FINAL_PATH}" >> $GITHUB_OUTPUT
+          
+          echo "SAFE_NAME=${SAFE_NAME}" >> $GITHUB_ENV
+          echo "FINAL_OUTPUT=${FINAL_PATH}" >> $GITHUB_ENV
+          echo "✅ SAFE_NAME: ${SAFE_NAME}"
+
+      - name: Download Logo Image
+        if: ${{ github.event.inputs.logo_image_url != '' }}
+        run: |
+          set -e
+          curl -f -L -o logo_original.png "${{ github.event.inputs.logo_image_url }}"
+          echo "✅ Logo downloaded successfully"
+
+      - name: Prepare Logo Image
+        if: ${{ github.event.inputs.logo_image_url != '' }}
+        run: |
+          set -e
+          python3 scripts/prepare_logo.py \
+            --input logo_original.png \
+            --output logo_ready.png \
+            --width "${{ github.event.inputs.logo_width }}" \
+            --opacity "${{ github.event.inputs.logo_opacity }}"
+
+      - name: Render Video with FFmpeg
+        run: |
+          set -e
+
+          POSISI="${{ github.event.inputs.logo_position }}"
+          MARGIN="${{ github.event.inputs.logo_margin }}"
+          LOGO_EXISTS=false
+          [ -f "logo_ready.png" ] && LOGO_EXISTS=true
+
+          echo "🎬 Processing video in Max Quality Mode..."
+
+          if [ "$LOGO_EXISTS" = "true" ]; then
+            case "$POSISI" in
+              top-left)      OVERLAY_X="$MARGIN";        OVERLAY_Y="$MARGIN" ;;
+              top-center)    OVERLAY_X="(W-w)/2";        OVERLAY_Y="$MARGIN" ;;
+              top-right)     OVERLAY_X="W-w-$MARGIN";    OVERLAY_Y="$MARGIN" ;;
+              bottom-left)   OVERLAY_X="$MARGIN";        OVERLAY_Y="H-h-$MARGIN" ;;
+              bottom-center) OVERLAY_X="(W-w)/2";        OVERLAY_Y="H-h-$MARGIN" ;;
+              bottom-right)  OVERLAY_X="W-w-$MARGIN";    OVERLAY_Y="H-h-$MARGIN" ;;
+              *)             OVERLAY_X="(W-w)/2";        OVERLAY_Y="$MARGIN" ;;
+            esac
+
+            ffmpeg -y \
+              -i downloads/input_video.mp4 \
+              -i logo_ready.png \
+              -i media/transisi/GJ.mp4 \
+              -filter_complex \
+              "[0:v]scale=1440:2560:flags=lanczos,setsar=1,setpts=PTS/1.1,unsharp=5:5:2.0:5:5:0.7,eq=contrast=1.40:brightness=0.05:saturation=1.10:gamma=1.05,format=yuv420p[base];\
+              [base][1:v]overlay=${OVERLAY_X}:${OVERLAY_Y}[mainv];\
+              [0:a]atempo=1.1,loudnorm=I=-14:LRA=11:TP=-1.5[maina];\
+              [2:v]scale=1440:2560:flags=lanczos,setsar=1,format=yuv420p,setpts=PTS-STARTPTS[tv];\
+              [2:a]asetpts=PTS-STARTPTS[ta];\
+              [mainv][maina][tv][ta]concat=n=2:v=1:a=1[vout][aout]" \
+              -map "[vout]" -map "[aout]" \
+              -c:v libx265 -tag:v hvc1 -r 30 -preset slow -crf 19 -profile:v main -level 5.1 \
+              -pix_fmt yuv420p -movflags +faststart \
+              -c:a aac -b:a 192k -ar 48000 \
+              "${{ env.FINAL_OUTPUT }}"
+          else
+            ffmpeg -y \
+              -i downloads/input_video.mp4 \
+              -i media/transisi/GJ.mp4 \
+              -filter_complex \
+              "[0:v]scale=1440:2560:flags=lanczos,setsar=1,setpts=PTS/1.1,eq=contrast=1.45:brightness=0.01:saturation=1.08:gamma=0.95,format=yuv420p[mainv];\
+              [0:a]atempo=1.1,loudnorm=I=-14:LRA=11:TP=-1.5[maina];\
+              [1:v]scale=1440:2560:flags=lanczos,setsar=1,format=yuv420p,setpts=PTS-STARTPTS[tv];\
+              [1:a]asetpts=PTS-STARTPTS[ta];\
+              [mainv][maina][tv][ta]concat=n=2:v=1:a=1[vout][aout]" \
+              -map "[vout]" -map "[aout]" \
+              -c:v libx264 -preset fast -crf 22 \
+              -pix_fmt yuv420p -movflags +faststart \
+              -c:a aac -b:a 192k -ar 48000 \
+              "${{ env.FINAL_OUTPUT }}"
+          fi
+
+      - name: Upload Rendered Video Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-video
+          path: media/*.mp4
+          retention-days: 1
+
+  # ==========================================
+  # JOB 3: UPLOAD TO YOUTUBE
+  # ==========================================
+  upload-youtube:
+    needs: render-video
+    if: ${{ github.event.inputs.upload_youtube == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Google API Libraries
+        run: |
+          pip install \
+            google-auth \
+            google-auth-oauthlib \
+            google-auth-httplib2 \
+            google-api-python-client
+
+      - name: Download Rendered Video Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rendered-video
+          path: media
+
+      - name: Upload to YouTube
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          INPUT_TITLE: ${{ github.event.inputs.post_title }}
+          INPUT_DESC: ${{ github.event.inputs.post_description }}
+          INPUT_TAGS: ${{ github.event.inputs.post_tags }}
+          FINAL_OUTPUT: ${{ needs.render-video.outputs.final_output }}
+        run: |
+          set -e
+          python3 scripts/upload_youtube.py \
+            --file "${FINAL_OUTPUT}" \
+            --title "${INPUT_TITLE}" \
+            --description "${INPUT_DESC}" \
+            --tags "${INPUT_TAGS}"
+
+  # ==========================================
+  # JOB 4: UPLOAD TO FACEBOOK REELS
+  # ==========================================
+  upload-facebook:
+    needs: render-video
+    if: ${{ github.event.inputs.upload_facebook == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Requests
+        run: pip install requests
+
+      - name: Download Rendered Video Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rendered-video
+          path: media
+
+      - name: Upload to Facebook Reels
+        env:
+          INPUT_TITLE: ${{ github.event.inputs.post_title }}
+          INPUT_DESC: ${{ github.event.inputs.post_description }}
+          FB_PAGE_ID: ${{ github.event.inputs.fb_page_id }}
+          FB_TOKEN: ${{ github.event.inputs.fb_access_token }}
+          FINAL_OUTPUT: ${{ needs.render-video.outputs.final_output }}
+        run: |
+          set -e
+          python3 scripts/upload_facebook.py \
+            --file "${FINAL_OUTPUT}" \
+            --page-id "${FB_PAGE_ID}" \
+            --access-token "${FB_TOKEN}" \
+            --title "${INPUT_TITLE}" \
+            --description "${INPUT_DESC}"
+
+  # ==========================================
+  # JOB 5: UPLOAD TO TIKTOK (VIA BUFFER API)
+  # ==========================================
+  upload-tiktok:
+    needs: render-video
+    if: ${{ github.event.inputs.upload_tiktok == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Rendered Video Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rendered-video
+          path: media
+
+      - name: Delete Old GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          echo "🗑️ Checking for old temporary releases..."
+          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases --jq '.[] | select(.tag_name == "tiktok_video") | .id' 2>/dev/null || echo "")
+          if [ -n "$RELEASE_ID" ]; then
+            gh api -X DELETE repos/${{ github.repository }}/releases/$RELEASE_ID
+            sleep 2
+            gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/tiktok_video || true
+            echo "✅ Old release deleted"
+          else
+            echo "ℹ️ No old release found"
+          fi
+
+      - name: Create Temporary Release for TikTok Host
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FINAL_OUTPUT: ${{ needs.render-video.outputs.final_output }}
+        run: |
+          set -e
+          echo "📦 Hosting video temporarily via GitHub release..."
+          gh release create tiktok_video \
+            --repo "${{ github.repository }}" \
+            --title "TikTok Video Temporary Host" \
+            --notes "Temporary public URL for Buffer API." \
+            "${FINAL_OUTPUT}"
+          
+          sleep 5
+          VIDEO_URL=$(gh api repos/${{ github.repository }}/releases/tags/tiktok_video --jq '.assets[0].browser_download_url')
+          if [ -z "$VIDEO_URL" ] || [ "$VIDEO_URL" = "null" ]; then
+            echo "❌ Failed to fetch public video URL"
+            exit 1
+          fi
+          echo "VIDEO_URL=${VIDEO_URL}" >> $GITHUB_ENV
+          echo "✅ Public Video URL: ${VIDEO_URL}"
+
+      - name: Upload TikTok via Buffer API
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_CHANNEL_ID: "6a2032d8c687a22dd457622f"
+          TIKTOK_CAPTION: ${{ github.event.inputs.tiktok_description }}
+          VIDEO_URL: ${{ env.VIDEO_URL }}
+        run: |
+          set -e
+          echo "📤 Sending post payload to Buffer API..."
+          python3 - <<'PYEOF'
+          import os
+          import json
+          import sys
+          import urllib.request
+          import urllib.error
+          from datetime import datetime, timezone, timedelta
+
+          api_key = os.environ["BUFFER_API_KEY"]
+          channel_id = os.environ["BUFFER_CHANNEL_ID"]
+          video_url = os.environ["VIDEO_URL"]
+          caption = os.environ.get("TIKTOK_CAPTION", "")
+
+          due_at = (datetime.now(timezone.utc) + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+          print(f"📅 Scheduled time : {due_at}")
+          print(f"🎬 Video URL      : {video_url}")
+
+          mutation = """
+          mutation CreatePost($text: String!, $channelId: String!, $dueAt: String!, $videoUrl: String!) {
+            createPost(input: {
+              text: $text
+              channelId: $channelId
+              schedulingType: automatic
+              mode: customScheduled
+              dueAt: $dueAt
+              assets: [{ video: { url: $videoUrl } }]
+            }) {
+              ... on PostActionSuccess { post { id dueAt } }
+              ... on MutationError { message }
+            }
+          }
+          """
+
+          variables = {
+              "text": caption,
+              "channelId": channel_id,
+              "dueAt": due_at,
+              "videoUrl": video_url
+          }
+
+          payload = json.dumps({"query": mutation, "variables": variables}).encode("utf-8")
+
+          req = urllib.request.Request(
+              "https://api.buffer.com/graphql",
+              data=payload,
+              headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {api_key}",
+              }
+          )
+
+          try:
+              with urllib.request.urlopen(req) as res:
+                  body = json.loads(res.read().decode("utf-8"))
+                  print(json.dumps(body, indent=2))
+          except urllib.error.HTTPError as e:
+              print(f"HTTP Error {e.code}: {e.read().decode()}")
+              sys.exit(1)
+          PYEOF
