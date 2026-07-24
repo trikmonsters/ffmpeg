@@ -413,51 +413,46 @@ jobs:
           import urllib.request
           import urllib.error
           from datetime import datetime, timezone, timedelta
-
+      
           api_key = os.environ["BUFFER_API_KEY"]
           channel_id = os.environ["BUFFER_CHANNEL_ID"]
           video_url = os.environ["VIDEO_URL"]
           caption = os.environ.get("TIKTOK_CAPTION", "")
-
+      
           due_at = (datetime.now(timezone.utc) + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
+      
           print(f"📅 Scheduled time : {due_at}")
           print(f"🎬 Video URL      : {video_url}")
-
-          mutation = """
-          mutation CreatePost($text: String!, $channelId: String!, $dueAt: String!, $videoUrl: String!) {
-            createPost(input: {
-              text: $text
-              channelId: $channelId
-              schedulingType: automatic
-              mode: customScheduled
-              dueAt: $dueAt
-              assets: [{ video: { url: $videoUrl } }]
-            }) {
-              ... on PostActionSuccess { post { id dueAt } }
-              ... on MutationError { message }
-            }
-          }
+      
+          mutation = f"""
+          mutation CreatePost {{
+            createPost(
+              input: {{
+                text: {json.dumps(caption)}
+                channelId: {json.dumps(channel_id)}
+                schedulingType: automatic
+                mode: customScheduled
+                dueAt: {json.dumps(due_at)}
+                assets: [{{ video: {{ url: {json.dumps(video_url)} }} }}]
+              }}
+            ) {{
+              ... on PostActionSuccess {{ post {{ id dueAt }} }}
+              ... on MutationError {{ message }}
+            }}
+          }}
           """
-
-          variables = {
-              "text": caption,
-              "channelId": channel_id,
-              "dueAt": due_at,
-              "videoUrl": video_url
-          }
-
-          payload = json.dumps({"query": mutation, "variables": variables}).encode("utf-8")
-
+    
+          payload = json.dumps({"query": mutation}).encode("utf-8")
+      
           req = urllib.request.Request(
-              "https://api.buffer.com/graphql",
+              "https://api.buffer.com",
               data=payload,
               headers={
                   "Content-Type": "application/json",
                   "Authorization": f"Bearer {api_key}",
               }
           )
-
+      
           try:
               with urllib.request.urlopen(req) as res:
                   body = json.loads(res.read().decode("utf-8"))
